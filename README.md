@@ -1,31 +1,31 @@
 # Multi-Asset Trading Bot
 
-Plataforma híbrida multi-activo (acciones, opciones, cripto spot) sobre Lumibot.
+Hybrid multi-asset platform (stocks, options, spot crypto) built on Lumibot.
 
-## Módulos
+## Modules
 
-| Archivo | Función |
+| File | Purpose |
 |---|---|
-| `config.json` | Estado y parámetros del sistema (fuente única de verdad) |
-| `config_models.py` | Validación Pydantic v2 + persistencia atómica |
-| `wheel_strategy.py` | Estrategia The Wheel (CSP → CC, cierre al 80%) vía Alpaca |
-| `crypto_rebalancer.py` | Rebalanceo spot BTC/ETH/USDC con umbral ±5% |
-| `app_dashboard.py` | Dashboard Streamlit: métricas, control en caliente, logs |
+| `config.json` | System state and parameters (single source of truth) |
+| `config_models.py` | Pydantic v2 validation + atomic persistence |
+| `wheel_strategy.py` | The Wheel strategy (CSP → CC, 80% early close) via Alpaca |
+| `crypto_rebalancer.py` | Spot BTC/ETH/USDC rebalancing with ±5% threshold |
+| `app_dashboard.py` | Streamlit dashboard: metrics, hot parameter control, logs |
 
-## Uso
+## Usage
 
 ```bash
 pip install -r requirements.txt
-cp .env.example .env        # completar claves API
+cp .env.example .env        # fill in API keys
 
-python crypto_rebalancer.py          # demo dry-run del rebalanceador
-python wheel_strategy.py             # motor Lumibot (paper por defecto)
-streamlit run app_dashboard.py       # panel de control
+python crypto_rebalancer.py          # rebalancer dry-run demo
+python wheel_strategy.py             # Lumibot engine (paper by default)
+streamlit run app_dashboard.py       # control panel
 ```
 
-## Seguridad
+## Safety
 
-- Puts solo cash-secured; calls solo covered; cripto solo spot (sin margen ni cortos).
-- `live_trading_mode: false` por defecto → paper trading. Mantener ≥60 días antes de pasar a real.
-- Kill switch y límite de pérdida diaria en `config.json`, editables desde el dashboard.
-- Credenciales solo por `.env` (excluido en `.gitignore`).
+- Puts are cash-secured only; calls are covered only; crypto is spot only (no margin or shorts).
+- `live_trading_mode: false` by default → paper trading. Keep it there for ≥60 days before going live.
+- Kill switch and daily loss limit live in `config.json`, editable from the dashboard.
+- Credentials via `.env` only (excluded in `.gitignore`).

@@ -1,15 +1,15 @@
-"""Estrategia 'The Wheel' (La Rueda) sobre Lumibot + Alpaca.
+"""'The Wheel' strategy on Lumibot + Alpaca.
 
-Ciclo de vida:
-  1. Venta de Cash-Secured Puts (CSP) con colateral 100% inmovilizado.
-  2. Si hay asignación (>=100 acciones), venta de Covered Calls (CC).
-  3. Cierre anticipado de cualquier opción corta al capturar el
-     `early_close_percentage_gain` (80%) de la prima recolectada.
+Lifecycle:
+  1. Sell Cash-Secured Puts (CSP) with 100% of the collateral locked in cash.
+  2. On assignment (>=100 shares), sell Covered Calls (CC).
+  3. Close any short option early once `early_close_percentage_gain`
+     (80%) of the collected premium has been captured.
 
-Reglas de seguridad (no negociables):
-  - CSP: cash disponible >= strike * 100 antes de transmitir la orden.
-  - CC:  >=100 acciones del subyacente en cartera por contrato vendido.
-  - Kill switch y límite de pérdida diaria evaluados en cada iteración.
+Safety rules (non-negotiable):
+  - CSP: available cash >= strike * 100 before transmitting the order.
+  - CC:  >=100 shares of the underlying held per contract sold.
+  - Kill switch and daily loss limit evaluated on every iteration.
 """
 
 from __future__ import annotations
@@ -30,16 +30,16 @@ OPTION_MULTIPLIER = 100
 
 class WheelStrategy(Strategy):
     # ------------------------------------------------------------------ #
-    # Ciclo de vida Lumibot                                               #
+    # Lumibot lifecycle                                                    #
     # ------------------------------------------------------------------ #
     def initialize(self) -> None:
-        self.sleeptime = "15M"  # frecuencia de evaluación
+        self.sleeptime = "15M"  # evaluation frequency
         self.config: TradingConfig = TradingConfig.load(CONFIG_PATH)
         self._config_mtime: float = CONFIG_PATH.stat().st_mtime
-        # Prima recolectada por opción corta abierta: {order_identifier: credito}
+        # Premium collected per open short option: {order_identifier: credit}
         self._open_premiums: dict[str, float] = {}
         self._session_start_value: Optional[float] = None
-        logger.info("WheelStrategy inicializada. Whitelist: %s",
+        logger.info("WheelStrategy initialized. Whitelist: %s",
                     self.config.wheel_parameters.whitelist_assets)
 
     def before_market_opens(self) -> None:
@@ -55,26 +55,26 @@ class WheelStrategy(Strategy):
         for symbol in wheel.whitelist_assets:
             try:
                 self._run_wheel_cycle(symbol)
-            except Exception:  # noqa: BLE001 - un activo no debe tumbar el bucle
-                logger.exception("Error en el ciclo de %s", symbol)
+            except Exception:  # noqa: BLE001 - one asset must not break the loop
+                logger.exception("Error in wheel cycle for %s", symbol)
 
     def on_abnormal_market_conditions(self) -> None:
-        """Disyuntor: cierra las posiciones cortas de opciones ante anomalías."""
-        logger.warning("Condiciones anormales de mercado: cerrando opciones cortas.")
+        """Circuit breaker: closes short option positions on anomalies."""
+        logger.warning("Abnormal market conditions: closing short options.")
         for pos in self.get_positions():
             if pos.asset.asset_type == Asset.AssetType.OPTION and pos.quantity < 0:
                 self._close_short_option(pos)
 
     # ------------------------------------------------------------------ #
-    # Guardas de seguridad                                                 #
+    # Safety guards                                                        #
     # ------------------------------------------------------------------ #
     def _system_is_safe_to_trade(self) -> bool:
         status = self.config.system_status
         if not status.active or status.emergency_kill_switch:
-            logger.warning("Sistema inactivo o kill switch activado. Sin operaciones.")
+            logger.warning("System inactive or kill switch engaged. No trading.")
             return False
         if self._daily_loss_limit_breached():
-            logger.error("Límite de pérdida diaria alcanzado. Trading suspendido hoy.")
+            logger.error("Daily loss limit reached. Trading suspended for today.")
             return False
         return True
 
@@ -86,33 +86,33 @@ class WheelStrategy(Strategy):
         return drawdown >= self.config.risk_guards.daily_loss_limit_percentage
 
     def _reload_config_if_changed(self) -> None:
-        """Recarga en caliente cuando el dashboard reescribe config.json."""
+        """Hot-reload when the dashboard rewrites config.json."""
         mtime = CONFIG_PATH.stat().st_mtime
         if mtime != self._config_mtime:
             self.config = TradingConfig.load(CONFIG_PATH)
             self._config_mtime = mtime
-            logger.info("config.json recargado en caliente.")
+            logger.info("config.json hot-reloaded.")
 
     # ------------------------------------------------------------------ #
-    # Núcleo de La Rueda                                                   #
+    # Wheel core                                                           #
     # ------------------------------------------------------------------ #
     def _run_wheel_cycle(self, symbol: str) -> None:
         underlying = Asset(symbol, asset_type=Asset.AssetType.STOCK)
         shares = self._shares_held(underlying)
         short_options = self._short_options_for(symbol)
 
-        # 1) Gestionar opciones cortas existentes (cierre anticipado al 80%).
+        # 1) Manage existing short options (early close at 80%).
         for pos in short_options:
             self._maybe_close_early(pos)
 
-        # Solo una opción corta viva por subyacente.
+        # Only one live short option per underlying.
         if self._short_options_for(symbol):
             return
 
-        # 2) Asignado (>=100 acciones) -> vender Covered Call.
+        # 2) Assigned (>=100 shares) -> sell Covered Call.
         if shares >= OPTION_MULTIPLIER:
             self._sell_covered_call(underlying, shares)
-        # 3) Sin acciones -> vender Cash-Secured Put.
+        # 3) No shares -> sell Cash-Secured Put.
         else:
             self._sell_cash_secured_put(underlying)
 
@@ -124,11 +124,11 @@ class WheelStrategy(Strategy):
         if contract is None:
             return
 
-        # --- CONTROL CASH-SECURED: colateral íntegro antes de la orden ---
+        # --- CASH-SECURED CHECK: full collateral before the order ---
         collateral = contract.strike * OPTION_MULTIPLIER
         if self.get_cash() < collateral:
             logger.warning(
-                "CSP %s rechazada: cash %.2f < colateral %.2f",
+                "CSP %s rejected: cash %.2f < collateral %.2f",
                 underlying.symbol, self.get_cash(), collateral,
             )
             return
@@ -141,7 +141,7 @@ class WheelStrategy(Strategy):
         submitted = self.submit_order(order)
         if submitted:
             self._open_premiums[str(submitted.identifier)] = premium
-            logger.info("CSP vendida %s strike %.2f prima ~%.2f",
+            logger.info("Sold CSP %s strike %.2f premium ~%.2f",
                         underlying.symbol, contract.strike, premium)
 
     def _sell_covered_call(self, underlying: Asset, shares: float) -> None:
@@ -152,7 +152,7 @@ class WheelStrategy(Strategy):
         if contract is None:
             return
 
-        # --- CONTROL COVERED: nunca más contratos que lotes de 100 ---
+        # --- COVERED CHECK: never more contracts than 100-share lots ---
         max_contracts = int(shares // OPTION_MULTIPLIER)
         if max_contracts < 1:
             return
@@ -162,11 +162,11 @@ class WheelStrategy(Strategy):
         submitted = self.submit_order(order)
         if submitted:
             self._open_premiums[str(submitted.identifier)] = premium
-            logger.info("CC vendida %s strike %.2f prima ~%.2f",
+            logger.info("Sold CC %s strike %.2f premium ~%.2f",
                         underlying.symbol, contract.strike, premium)
 
     def _maybe_close_early(self, position) -> None:
-        """Recompra la opción corta al capturar el % objetivo de la prima."""
+        """Buy back the short option once the target % of premium is captured."""
         wheel = self.config.wheel_parameters
         entry_premium = self._open_premiums.get(str(position.orders[0].identifier)
                                                 if position.orders else "", None)
@@ -175,7 +175,7 @@ class WheelStrategy(Strategy):
             return
         captured = (entry_premium - current) / entry_premium
         if captured >= wheel.early_close_percentage_gain:
-            logger.info("Cierre anticipado %s: %.0f%% de la prima capturada",
+            logger.info("Early close %s: %.0f%% of premium captured",
                         position.asset, captured * 100)
             self._close_short_option(position)
 
@@ -186,14 +186,14 @@ class WheelStrategy(Strategy):
         self.submit_order(order)
 
     # ------------------------------------------------------------------ #
-    # Selección de contratos                                               #
+    # Contract selection                                                   #
     # ------------------------------------------------------------------ #
     def _select_contract(
         self, underlying: Asset, right: str, target_delta: float
     ) -> Optional[Asset]:
-        """Elige el contrato dentro de la ventana DTE cuyo delta se aproxima
-        al objetivo. El delta se estima con greeks del bróker; si no están
-        disponibles, se usa la distancia OTM como proxy conservador."""
+        """Pick the contract within the DTE window whose delta is closest
+        to the target. Delta comes from broker greeks; if unavailable,
+        OTM distance is used as a conservative proxy."""
         wheel = self.config.wheel_parameters
         price = self.get_last_price(underlying)
         chains = self.get_chains(underlying)
@@ -214,7 +214,7 @@ class WheelStrategy(Strategy):
         best: Optional[Asset] = None
         best_gap = float("inf")
         for strike in strikes:
-            # Solo strikes OTM (put: por debajo del precio; call: por encima).
+            # OTM strikes only (put: below spot; call: above spot).
             if right == "put" and strike >= price:
                 continue
             if right == "call" and strike <= price:
@@ -244,14 +244,14 @@ class WheelStrategy(Strategy):
         greeks = self.get_greeks(contract)
         if greeks and greeks.get("delta") is not None:
             return float(greeks["delta"])
-        # Proxy sin greeks: moneyness lineal acotada (aprox. burda, solo fallback).
+        # Proxy without greeks: bounded linear moneyness (rough, fallback only).
         moneyness = abs(spot - contract.strike) / spot
         magnitude = max(0.05, min(0.95, 0.5 - moneyness * 2.5))
         sign = -1.0 if contract.right.lower() == "put" else 1.0
         return sign * magnitude
 
     # ------------------------------------------------------------------ #
-    # Utilidades                                                           #
+    # Utilities                                                            #
     # ------------------------------------------------------------------ #
     def _shares_held(self, underlying: Asset) -> float:
         pos = self.get_position(underlying)
@@ -276,9 +276,9 @@ class WheelStrategy(Strategy):
         portfolio = self.get_portfolio_value() or 0.0
         if portfolio <= 0:
             return False
-        # Para CSP el colateral es la exposición máxima teórica.
-        if exposure / portfolio > max(limit * 10, limit):  # colateral, no riesgo neto
-            logger.warning("Exposición %.2f excede el límite por operación.", exposure)
+        # For CSPs the collateral is the theoretical maximum exposure.
+        if exposure / portfolio > max(limit * 10, limit):  # collateral, not net risk
+            logger.warning("Exposure %.2f exceeds per-trade limit.", exposure)
             return False
         return True
 

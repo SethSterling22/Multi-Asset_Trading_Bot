@@ -1,15 +1,15 @@
-"""Panel de control Streamlit del sistema de trading algorítmico.
+"""Streamlit control panel for the algorithmic trading system.
 
-Páginas (st.navigation):
-  1. Métricas    - saldo, P&L diario, Sharpe, Max Drawdown, curva de equidad.
-  2. Parámetros  - edición en caliente de config.json validada con Pydantic.
-  3. Registro    - últimas operaciones (st.dataframe) y config activa (st.json).
+Pages (st.navigation):
+  1. Metrics     - balance, daily P&L, Sharpe, Max Drawdown, equity curve.
+  2. Parameters  - hot-editing of config.json validated with Pydantic.
+  3. Logs        - latest trades (st.dataframe) and active config (st.json).
 
-Refresco: se compara el mtime del log de operaciones en cada rerun; si el
-motor escribió nuevos datos, se invalida la caché y se recargan los gráficos
-sin bucles bloqueantes.
+Refresh: the trades log mtime is compared on every rerun; if the engine
+wrote new data, the cache is invalidated and charts reload from disk
+without blocking loops.
 
-Ejecución:  streamlit run app_dashboard.py
+Run:  streamlit run app_dashboard.py
 """
 
 from __future__ import annotations
@@ -25,14 +25,14 @@ from pydantic import ValidationError
 from config_models import CONFIG_PATH, TradingConfig
 
 BASE_DIR = Path(__file__).parent
-TRADES_LOG = BASE_DIR / "logs" / "trades.csv"      # escrito por el motor Lumibot
-EQUITY_LOG = BASE_DIR / "logs" / "equity.csv"      # columnas: timestamp,equity
+TRADES_LOG = BASE_DIR / "logs" / "trades.csv"      # written by the Lumibot engine
+EQUITY_LOG = BASE_DIR / "logs" / "equity.csv"      # columns: timestamp,equity
 
 st.set_page_config(page_title="Multi-Asset Trading Bot", layout="wide")
 
 
 # ---------------------------------------------------------------------- #
-# Carga de datos con invalidación por mtime                               #
+# Data loading with mtime-based invalidation                              #
 # ---------------------------------------------------------------------- #
 def _mtime(path: Path) -> float:
     return path.stat().st_mtime if path.exists() else 0.0
@@ -40,8 +40,8 @@ def _mtime(path: Path) -> float:
 
 @st.cache_data(show_spinner=False)
 def load_csv(path_str: str, mtime: float) -> pd.DataFrame:
-    """`mtime` forma parte de la clave de caché: si el motor escribe el
-    archivo, la clave cambia y Streamlit recarga desde disco."""
+    """`mtime` is part of the cache key: when the engine writes the file,
+    the key changes and Streamlit reloads from disk."""
     path = Path(path_str)
     if not path.exists():
         return pd.DataFrame()
@@ -53,7 +53,7 @@ def load_config() -> TradingConfig:
 
 
 # ---------------------------------------------------------------------- #
-# Métricas financieras                                                    #
+# Financial metrics                                                       #
 # ---------------------------------------------------------------------- #
 def compute_metrics(equity: pd.DataFrame) -> dict:
     if equity.empty or "equity" not in equity:
@@ -72,65 +72,65 @@ def compute_metrics(equity: pd.DataFrame) -> dict:
 
 
 # ---------------------------------------------------------------------- #
-# Página 1: Métricas                                                      #
+# Page 1: Metrics                                                         #
 # ---------------------------------------------------------------------- #
 def page_metrics() -> None:
-    st.title("Métricas financieras")
+    st.title("Financial metrics")
     equity = load_csv(str(EQUITY_LOG), _mtime(EQUITY_LOG))
     m = compute_metrics(equity)
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Saldo neto de liquidación", f"${m['balance']:,.2f}")
-    c2.metric("P&L del día", f"${m['pnl_day']:,.2f}", f"{m['pnl_day_pct']:+.2f}%")
-    c3.metric("Ratio de Sharpe", f"{m['sharpe']:.2f}")
-    c4.metric("Max Drawdown", f"{m['max_drawdown']:.2f}%")
+    c1.metric("Net liquidation balance", f"${m['balance']:,.2f}")
+    c2.metric("Daily P&L", f"${m['pnl_day']:,.2f}", f"{m['pnl_day_pct']:+.2f}%")
+    c3.metric("Sharpe ratio", f"{m['sharpe']:.2f}")
+    c4.metric("Max drawdown", f"{m['max_drawdown']:.2f}%")
 
     if not equity.empty:
         fig = px.line(equity, x="timestamp", y="equity",
-                      title="Curva de equidad acumulada")
+                      title="Cumulative equity curve")
         st.plotly_chart(fig, use_container_width=True)
     else:
-        st.info("Aún no hay datos de equidad en logs/equity.csv.")
+        st.info("No equity data yet in logs/equity.csv.")
 
 
 # ---------------------------------------------------------------------- #
-# Página 2: Consola de parámetros (control en caliente)                   #
+# Page 2: Parameter console (hot control)                                 #
 # ---------------------------------------------------------------------- #
 def page_parameters() -> None:
-    st.title("Consola de ajuste de parámetros")
+    st.title("Strategy parameter console")
     cfg = load_config()
     wheel, guards = cfg.wheel_parameters, cfg.risk_guards
 
-    st.subheader("Estado del sistema")
+    st.subheader("System status")
     col_a, col_b, col_c = st.columns(3)
-    active = col_a.toggle("Sistema activo", value=cfg.system_status.active)
-    kill = col_b.toggle("Kill switch de emergencia",
+    active = col_a.toggle("System active", value=cfg.system_status.active)
+    kill = col_b.toggle("Emergency kill switch",
                         value=cfg.system_status.emergency_kill_switch)
-    live = col_c.toggle("Modo live trading (⚠ real)",
+    live = col_c.toggle("Live trading mode (⚠ real money)",
                         value=cfg.system_status.live_trading_mode)
 
-    st.subheader("La Rueda (The Wheel)")
-    delta_csp = st.slider("Delta objetivo CSP (put corta)", -0.50, -0.05,
+    st.subheader("The Wheel")
+    delta_csp = st.slider("Target CSP delta (short put)", -0.50, -0.05,
                           float(wheel.delta_limit_csp), 0.01)
-    delta_cc = st.slider("Delta objetivo Covered Call", 0.05, 0.50,
+    delta_cc = st.slider("Target Covered Call delta", 0.05, 0.50,
                          float(wheel.delta_limit_cc), 0.01)
-    early_close = st.slider("Cierre anticipado (% de prima capturada)", 0.50, 0.95,
+    early_close = st.slider("Early close (% of premium captured)", 0.50, 0.95,
                             float(wheel.early_close_percentage_gain), 0.05)
-    dte = st.slider("Ventana de expiración (días, DTE)", 7, 90,
+    dte = st.slider("Expiration window (days, DTE)", 7, 90,
                     (wheel.target_expiration_days_min,
                      wheel.target_expiration_days_max))
-    whitelist = st.text_input("Whitelist de activos (separados por coma)",
+    whitelist = st.text_input("Asset whitelist (comma-separated)",
                               ", ".join(wheel.whitelist_assets))
 
-    st.subheader("Guardas de riesgo")
-    max_risk = st.number_input("Riesgo máx. por operación (fracción de cartera)",
+    st.subheader("Risk guards")
+    max_risk = st.number_input("Max risk per trade (portfolio fraction)",
                                0.005, 0.10, float(guards.max_portfolio_risk_per_trade),
                                0.005, format="%.3f")
-    daily_loss = st.number_input("Límite de pérdida diaria (fracción)",
+    daily_loss = st.number_input("Daily loss limit (fraction)",
                                  0.005, 0.20, float(guards.daily_loss_limit_percentage),
                                  0.005, format="%.3f")
 
-    if st.button("Guardar configuración", type="primary"):
+    if st.button("Save configuration", type="primary"):
         try:
             updated = cfg.model_copy(deep=True)
             updated.system_status.active = active
@@ -146,36 +146,36 @@ def page_parameters() -> None:
             ]
             updated.risk_guards.max_portfolio_risk_per_trade = max_risk
             updated.risk_guards.daily_loss_limit_percentage = daily_loss
-            # Revalidación completa antes de tocar el disco.
+            # Full revalidation before touching disk.
             validated = TradingConfig.model_validate(updated.model_dump())
             validated.save(CONFIG_PATH)
-            st.success("config.json validado y guardado. El motor lo recargará en caliente.")
+            st.success("config.json validated and saved. The engine will hot-reload it.")
         except ValidationError as exc:
-            st.error(f"Configuración rechazada por Pydantic:\n\n{exc}")
+            st.error(f"Configuration rejected by Pydantic:\n\n{exc}")
 
 
 # ---------------------------------------------------------------------- #
-# Página 3: Registro operativo                                            #
+# Page 3: Operations log                                                  #
 # ---------------------------------------------------------------------- #
 def page_logs() -> None:
-    st.title("Registro operativo y alertas")
+    st.title("Operations log and alerts")
     trades = load_csv(str(TRADES_LOG), _mtime(TRADES_LOG))
     if not trades.empty:
         st.dataframe(trades.tail(100), use_container_width=True)
     else:
-        st.info("Sin operaciones registradas en logs/trades.csv.")
+        st.info("No trades recorded yet in logs/trades.csv.")
 
-    st.subheader("Configuración activa")
+    st.subheader("Active configuration")
     with open(CONFIG_PATH, "r", encoding="utf-8") as fh:
         st.json(json.load(fh))
 
 
 # ---------------------------------------------------------------------- #
-# Navegación                                                              #
+# Navigation                                                              #
 # ---------------------------------------------------------------------- #
 pages = st.navigation([
-    st.Page(page_metrics, title="Métricas P&L", icon="📈", default=True),
-    st.Page(page_parameters, title="Parámetros", icon="🎛️"),
-    st.Page(page_logs, title="Registro", icon="🧾"),
+    st.Page(page_metrics, title="P&L Metrics", icon="📈", default=True),
+    st.Page(page_parameters, title="Parameters", icon="🎛️"),
+    st.Page(page_logs, title="Logs", icon="🧾"),
 ])
 pages.run()

@@ -1,19 +1,19 @@
-"""Rebalanceador periódico de cartera cripto (spot únicamente).
+"""Periodic crypto portfolio rebalancer (spot only).
 
-Asignación objetivo (config.json):
-  - stable_target_allocation  -> USDC (cojín defensivo)
-  - crypto_target_allocation  -> repartido a partes iguales entre monitored_assets
+Target allocation (config.json):
+  - stable_target_allocation  -> USDC (defensive cash cushion)
+  - crypto_target_allocation  -> split equally across monitored_assets
 
-Reglas de seguridad:
-  - Sin apalancamiento, sin cortos: solo órdenes spot; una venta nunca
-    excede las tenencias reales y una compra nunca excede el USDC disponible.
-  - Solo se generan órdenes si la desviación absoluta de peso supera
-    `rebalance_threshold` (±5% por defecto).
+Safety rules:
+  - No leverage, no shorts: spot orders only; a sell never exceeds
+    actual holdings and a buy never exceeds available USDC.
+  - Orders are generated only when the absolute weight deviation
+    exceeds `rebalance_threshold` (±5% by default).
 
-El acceso al bróker se abstrae con `SpotBroker` para poder inyectar
-Alpaca Crypto o Coinbase Advanced (endpoint /api/v3/brokerage con claves
-CDP) sin tocar la lógica de rebalanceo. Incluye un broker simulado para
-pruebas locales.
+Broker access is abstracted behind the `SpotBroker` protocol so Alpaca
+Crypto or Coinbase Advanced (endpoint /api/v3/brokerage with CDP keys)
+can be injected without touching the rebalancing logic. A simulated
+broker is included for local testing.
 """
 
 from __future__ import annotations
@@ -27,32 +27,32 @@ from config_models import CONFIG_PATH, TradingConfig
 logger = logging.getLogger("crypto_rebalancer")
 
 STABLE_SYMBOL = "USDC"
-MIN_ORDER_NOTIONAL_USD = 10.0  # evita micro-órdenes por ruido de precios
+MIN_ORDER_NOTIONAL_USD = 10.0  # avoids micro-orders caused by price noise
 
 
 # ---------------------------------------------------------------------- #
-# Abstracción del bróker spot                                             #
+# Spot broker abstraction                                                 #
 # ---------------------------------------------------------------------- #
 class SpotBroker(Protocol):
     def get_balances(self) -> Dict[str, float]:
-        """Unidades por símbolo, ej. {'BTC': 0.5, 'ETH': 4.0, 'USDC': 12000}."""
+        """Units per symbol, e.g. {'BTC': 0.5, 'ETH': 4.0, 'USDC': 12000}."""
         ...
 
     def get_price_usd(self, symbol: str) -> float:
-        """Precio spot en USD del símbolo."""
+        """Spot price in USD for the symbol."""
         ...
 
     def market_buy(self, symbol: str, notional_usd: float) -> str:
-        """Compra spot por importe en USD. Devuelve el id de la orden."""
+        """Spot buy by USD notional. Returns the order id."""
         ...
 
     def market_sell(self, symbol: str, quantity: float) -> str:
-        """Venta spot por cantidad de unidades. Devuelve el id de la orden."""
+        """Spot sell by unit quantity. Returns the order id."""
         ...
 
 
 class PaperSpotBroker:
-    """Broker simulado en memoria para desarrollo y backtests rápidos."""
+    """In-memory simulated broker for development and quick backtests."""
 
     def __init__(self, balances: Dict[str, float], prices: Dict[str, float]):
         self._balances = dict(balances)
@@ -82,14 +82,14 @@ class PaperSpotBroker:
 
 
 # ---------------------------------------------------------------------- #
-# Lógica de rebalanceo                                                    #
+# Rebalancing logic                                                       #
 # ---------------------------------------------------------------------- #
 @dataclass(frozen=True)
 class RebalanceOrder:
     symbol: str
     side: str            # "buy" | "sell"
-    notional_usd: float  # importe objetivo de la orden
-    quantity: float      # unidades (relevante en ventas)
+    notional_usd: float  # target order notional
+    quantity: float      # units (relevant for sells)
     reason: str
 
 
@@ -98,7 +98,7 @@ class CryptoRebalancer:
         self.broker = broker
         self.config = config or TradingConfig.load(CONFIG_PATH)
 
-    # ------------------------- cálculo de pesos ------------------------ #
+    # ------------------------- weight computation ---------------------- #
     def target_weights(self) -> Dict[str, float]:
         p = self.config.crypto_parameters
         per_asset = p.crypto_target_allocation / len(p.monitored_assets)
@@ -107,7 +107,7 @@ class CryptoRebalancer:
         return weights
 
     def current_state(self) -> tuple[Dict[str, float], float]:
-        """Devuelve (valor_usd_por_activo, valor_total)."""
+        """Returns (usd_value_per_asset, total_value)."""
         balances = self.broker.get_balances()
         values: Dict[str, float] = {}
         for sym in self.target_weights():
@@ -116,15 +116,15 @@ class CryptoRebalancer:
             values[sym] = qty * price
         return values, sum(values.values())
 
-    # ------------------------- plan de órdenes ------------------------- #
+    # ------------------------- order planning -------------------------- #
     def plan(self) -> List[RebalanceOrder]:
         if self.config.system_status.emergency_kill_switch:
-            logger.warning("Kill switch activo: rebalanceo abortado.")
+            logger.warning("Kill switch engaged: rebalance aborted.")
             return []
 
         values, total = self.current_state()
         if total <= 0:
-            logger.warning("Cartera vacía: nada que rebalancear.")
+            logger.warning("Empty portfolio: nothing to rebalance.")
             return []
 
         threshold = self.config.crypto_parameters.rebalance_threshold
@@ -133,7 +133,7 @@ class CryptoRebalancer:
 
         for sym, target_w in self.target_weights().items():
             if sym == STABLE_SYMBOL:
-                continue  # la stablecoin absorbe el residuo de las demás órdenes
+                continue  # the stablecoin absorbs the residual of other orders
             current_w = values[sym] / total
             deviation = current_w - target_w
             if abs(deviation) < threshold:
@@ -145,27 +145,27 @@ class CryptoRebalancer:
             price = self.broker.get_price_usd(sym)
 
             if deviation > 0:
-                # Sobreponderado -> vender. Nunca más de lo que se posee (sin cortos).
+                # Overweight -> sell. Never more than held (no shorts).
                 qty = min(delta_usd / price, balances.get(sym, 0.0))
                 if qty <= 0:
                     continue
                 orders.append(RebalanceOrder(
                     sym, "sell", qty * price, qty,
-                    f"peso {current_w:.2%} > objetivo {target_w:.2%}",
+                    f"weight {current_w:.2%} > target {target_w:.2%}",
                 ))
             else:
-                # Infraponderado -> comprar. Limitado al USDC real (sin margen).
+                # Underweight -> buy. Capped at actual USDC (no margin).
                 notional = min(delta_usd, balances.get(STABLE_SYMBOL, 0.0))
                 if notional < MIN_ORDER_NOTIONAL_USD:
                     continue
                 orders.append(RebalanceOrder(
                     sym, "buy", notional, notional / price,
-                    f"peso {current_w:.2%} < objetivo {target_w:.2%}",
+                    f"weight {current_w:.2%} < target {target_w:.2%}",
                 ))
         return orders
 
     def execute(self, dry_run: bool = True) -> List[str]:
-        """Ejecuta el plan. Con dry_run=True solo registra las órdenes."""
+        """Executes the plan. With dry_run=True, orders are only logged."""
         order_ids: List[str] = []
         for order in self.plan():
             logger.info("[%s] %s %s ~$%.2f (%s)",
@@ -183,13 +183,13 @@ class CryptoRebalancer:
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    # Demostración con cartera desviada: BTC sobreponderado.
+    # Demo with a drifted portfolio: BTC overweight.
     demo = PaperSpotBroker(
         balances={"BTC": 0.30, "ETH": 2.0, "USDC": 5000.0},
         prices={"BTC": 68000.0, "ETH": 3500.0},
     )
     bot = CryptoRebalancer(demo)
     cfg_live = not bot.config.system_status.live_trading_mode
-    ids = bot.execute(dry_run=cfg_live)  # dry-run salvo modo live explícito
+    ids = bot.execute(dry_run=cfg_live)  # dry-run unless live mode is explicit
     values, total = bot.current_state()
-    print(f"Valor total: ${total:,.2f} | Órdenes ejecutadas: {ids or 'ninguna (dry-run)'}")
+    print(f"Total value: ${total:,.2f} | Executed orders: {ids or 'none (dry-run)'}")
