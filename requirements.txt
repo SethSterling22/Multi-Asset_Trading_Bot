@@ -1,0 +1,8 @@
+lumibot>=3.8
+alpaca-py>=0.30
+coinbase-advanced-py>=1.7
+pydantic>=2.7
+streamlit>=1.38
+plotly>=5.22
+pandas>=2.2
+python-dotenv>=1.0
