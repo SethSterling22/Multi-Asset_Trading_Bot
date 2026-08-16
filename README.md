@@ -20,6 +20,7 @@ any live deployment.
 | `crypto_rebalancer.py` | Spot BTC/ETH/USDC rebalancing with a ±5% threshold |
 | `app_dashboard.py` | Streamlit dashboard: metrics, hot parameter control, logs |
 | `RUNNING.md` | Full runbook: paper trading → go/no-go → live deployment |
+| `ROADMAP.md` | Phased plan for upcoming work |
 
 ---
 
@@ -90,6 +91,8 @@ Risk limits are structural, not just validated:
 
 - [RUNNING.md](RUNNING.md) — installation, account setup, the 60-day paper
   phase, the go/no-go checklist, and how to switch to live capital.
+- [ROADMAP.md](ROADMAP.md) — planned evolution: foundations, additional
+  strategies, the data and intelligence layer, and operations.
 
 ---
 
