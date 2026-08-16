@@ -284,14 +284,43 @@ class WheelStrategy(Strategy):
 
 
 if __name__ == "__main__":
+    import os
+    import sys
+
+    from dotenv import load_dotenv
     from lumibot.brokers import Alpaca
     from lumibot.traders import Trader
 
-    import os
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+
+    load_dotenv()  # reads .env from the project root
+
+    missing = [k for k in ("ALPACA_API_KEY", "ALPACA_API_SECRET")
+               if not os.environ.get(k)]
+    if missing:
+        sys.exit(
+            f"Missing credentials: {', '.join(missing)}.\n"
+            "Copy .env.example to .env and fill in your Alpaca API keys "
+            "(see RUNNING.md section 3)."
+        )
+
+    config = TradingConfig.load()
+    is_paper = not config.system_status.live_trading_mode
+
+    if not is_paper:
+        logger.warning("=" * 62)
+        logger.warning("LIVE TRADING MODE — orders will use REAL money.")
+        logger.warning("=" * 62)
+    else:
+        logger.info("Paper trading mode (live_trading_mode=false).")
+
     ALPACA_CONFIG = {
         "API_KEY": os.environ["ALPACA_API_KEY"],
         "API_SECRET": os.environ["ALPACA_API_SECRET"],
-        "PAPER": not TradingConfig.load().system_status.live_trading_mode,
+        "PAPER": is_paper,
     }
     trader = Trader()
     broker = Alpaca(ALPACA_CONFIG)
