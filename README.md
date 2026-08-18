@@ -26,12 +26,14 @@ any live deployment.
 
 ## Quick start
 
-Requires Python 3.10+.
+**Requires Python 3.12.** Not 3.13 or 3.14 — Lumibot is only tested through
+3.12, and source-built newer versions often lack required C extensions.
 
 ```bash
 # 1. Environment
 python3 -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
+python --version                   # must report 3.12.x
 pip install -r requirements.txt
 mkdir -p logs
 

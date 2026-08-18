@@ -38,7 +38,20 @@ Everything below assumes these are addressed before Phase 3.
 
 ## 1. Prerequisites
 
-- **Python 3.10 or newer** (`python3 --version`)
+- **Python 3.12** (`python3 --version`)
+
+  Do not use 3.13 or 3.14. Lumibot declares `requires-python >=3.10` but only
+  classifies support through 3.12, and newer builds — particularly those
+  compiled from source by version managers such as mise or pyenv — frequently
+  ship without required C extensions, producing errors like
+  `ModuleNotFoundError: No module named '_decimal'` or `'math'`. Those are
+  symptoms of an incomplete Python build, not a missing package.
+
+  ```bash
+  mise install python@3.12 && mise use python@3.12   # if using mise
+  pyenv install 3.12 && pyenv local 3.12             # if using pyenv
+  ```
+
 - **git** (optional, for version control)
 - A machine that can stay online during market hours — your own computer is
   fine for paper trading; consider a small VPS for live operation.
@@ -57,6 +70,9 @@ cd /path/to/Multi-Asset_Trading_Bot
 # Create an isolated environment (keeps this project's packages separate)
 python3 -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
+
+# Confirm the interpreter before installing anything
+python --version                   # must report 3.12.x
 
 # Install dependencies
 pip install --upgrade pip
