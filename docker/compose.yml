@@ -1,0 +1,330 @@
+# =============================================================================
+# Anexo C — docker/compose.yml
+# Multi-Asset_Trading_Bot · homelab, Docker Compose + Traefik
+#
+# Principios que explican la forma de este fichero:
+#   · order-router es el ÚNICO servicio que ENVÍA órdenes (replicas: 1) y el
+#     único con la clave de trading (`trading_keys`)
+#   · reconciler necesita LEER el estado real de la cuenta -> clave SOLO-LECTURA
+#     distinta (`account_ro_keys`), sin permiso de trading
+#   · las estrategias NO llevan ninguna clave: consumen features del bus
+#   · llm-analyst NO tiene secretos de exchange, deliberadamente
+#   · tres redes: proxy (solo lo expuesto), data (DB/bus/motores), obs
+#   · el order-router está en `data` y NO en `proxy`
+#   · secretos vía SOPS+age → tmpfs → docker secrets, nunca en env
+#
+# Arranque:  make up        (descifra secretos a tmpfs y levanta)
+# Observab.: docker compose -f compose.yml -f compose.obs.yml up -d
+# =============================================================================
+
+x-py: &py
+  build: { context: .., dockerfile: docker/Dockerfile.engine }
+  restart: unless-stopped
+  env_file: [../config/common.env]
+  depends_on:
+    postgres: { condition: service_healthy }
+    redis:    { condition: service_healthy }
+  networks: [data]
+  logging: { driver: json-file, options: { max-size: "20m", max-file: "5" } }
+  stop_grace_period: 30s
+
+x-md: &md
+  <<: *py
+  # Los ingesters llevan claves de MARKET DATA (solo-lectura, sin cuenta).
+  secrets: [md_keys]
+
+secrets:
+  # Escritos por ops/secrets/decrypt.sh a un tmpfs. Nunca tocan el disco.
+  # UNA CLAVE POR SERVICIO, con el mínimo permiso que necesita:
+  trading_keys:    { file: /run/trading-secrets/trading.env }     # trade, sin retiros
+  account_ro_keys: { file: /run/trading-secrets/account_ro.env }  # view only
+  md_keys:         { file: /run/trading-secrets/marketdata.env }  # market data
+  llm_keys:        { file: /run/trading-secrets/llm.env }
+  pg_password:  { file: /run/trading-secrets/pg.txt }
+  cf_dns_token: { file: /run/trading-secrets/cf_dns.txt }
+
+networks:
+  # `data` NO puede ser `internal: true`: los ingesters, el order-router, el
+  # reconciler y el llm-analyst necesitan salida a internet. El aislamiento se
+  # consigue no publicando puertos y por firewall del host, no por esta bandera.
+  proxy: {}
+  data:  {}
+  obs:   {}
+
+volumes:
+  pgdata: {}
+  redisdata: {}
+  vmdata: {}
+  grafana: {}
+  loki: {}
+  traefik-acme: {}
+  parquet-archive: {}         # tier frío: DuckDB/Parquet
+
+# =============================================================================
+services:
+
+  # --- BORDE ------------------------------------------------------------------
+  traefik:
+    image: traefik:v3
+    restart: unless-stopped
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedByDefault=false
+      - --entryPoints.websecure.address=:443          # solo 443: con DNS-01 no hace falta :80
+      - --certificatesResolvers.le.acme.dnsChallenge.provider=cloudflare
+      - --certificatesResolvers.le.acme.dnsChallenge.resolvers=1.1.1.1:53,8.8.8.8:53
+      - --certificatesResolvers.le.acme.email=${ACME_EMAIL}
+      - --certificatesResolvers.le.acme.storage=/acme/acme.json
+      # ⚠️ EMPIEZA CON STAGING o agotarás el rate limit de Let's Encrypt en una tarde:
+      # - --certificatesResolvers.le.acme.caServer=https://acme-staging-v02.api.letsencrypt.org/directory
+      - --api.insecure=false
+      - --metrics.prometheus=true
+    ports: ["443:443"]
+    environment:
+      CF_DNS_API_TOKEN_FILE: /run/secrets/cf_dns_token   # scope mínimo: Zone:DNS:Edit, 1 zona
+    secrets: [cf_dns_token]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik-acme:/acme
+    networks: [proxy, obs]
+
+  # --- ESTADO -----------------------------------------------------------------
+  postgres:
+    image: timescale/timescaledb-ha:pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: trading
+      POSTGRES_USER: trading
+      POSTGRES_PASSWORD_FILE: /run/secrets/pg_password
+    secrets: [pg_password]
+    volumes:
+      - pgdata:/home/postgres/pgdata
+      - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+    command: >
+      postgres -c config_file=/etc/postgresql/postgresql.conf
+    # Tuning de referencia para 64 GB (ver postgresql.conf):
+    #   shared_buffers=16GB  effective_cache_size=48GB  max_wal_size=8GB
+    #   wal_compression=on   random_page_cost=1.1
+    #   timescaledb.max_background_workers=16
+    #   synchronous_commit=on   ← global. El ingester usa SET LOCAL off antes del COPY.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trading -d trading"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks: [data]
+    shm_size: 1gb
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: >
+      redis-server --appendonly yes --appendfsync everysec
+                   --maxmemory 2gb --maxmemory-policy noeviction
+    volumes: [redisdata:/data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      retries: 5
+    networks: [data]
+
+  # --- INGESTA DE DATOS -------------------------------------------------------
+  # Separados por DOMINIO DE FALLO: una tormenta de reconexiones en los venues
+  # de datos no debe congelar el venue de ejecución.
+  # WS-read y DB-write van EN EL MISMO PROCESO (asyncio.Queue), no en dos.
+
+  md-coinbase:
+    <<: *md
+    command: python -m data.ingest.ws_runner --venue coinbase
+    environment: { VENUE: coinbase, STREAMS: "ticker,level2,user,candles" }
+
+  md-kraken:
+    <<: *md
+    command: python -m data.ingest.ws_runner --venue kraken
+    environment: { VENUE: kraken, STREAMS: "book,ohlc,executions" }
+
+  md-derivs:
+    # Funding, open interest y el TAPE DE LIQUIDACIONES.
+    # Arráncalo el día 1: nadie te vende este histórico retroactivamente.
+    <<: *md
+    command: python -m data.ingest.derivs_runner
+
+  md-altdata:
+    # Cadencia lenta: FRED, Deribit DVOL, Coinalyze, DefiLlama, RSS, noticias,
+    # y los JSON de status page que alimentan el circuit breaker.
+    <<: *md
+    command: python -m data.sources.runner
+
+  feature-builder:
+    <<: *py
+    command: python -m data.features.runner
+    # Refresca los continuous aggregates y calcula features derivadas.
+
+  # --- ESTRATEGIAS  (una por familia: deploy y reinicio independientes) -------
+  # Las estrategias NO llevan ninguna credencial de exchange: leen features y
+  # precios de Postgres/Redis y publican Intents en el bus. Si una estrategia
+  # necesitase una clave, el diseño está mal: significa que está ejecutando.
+  strategy-wheel:
+    <<: *py
+    command: python -m strategies.wheel.runner
+
+  strategy-crypto-rebalance:
+    <<: *py
+    command: python -m strategies.crypto_rebalance.runner
+
+  strategy-funding-carry:
+    <<: *py
+    command: python -m strategies.funding_carry.runner
+
+  strategy-xsec-momentum:
+    <<: *py
+    command: python -m strategies.xsec_momentum.runner
+
+  strategy-trend:
+    <<: *py
+    command: python -m strategies.trend.runner
+
+  # --- EJECUCIÓN --------------------------------------------------------------
+  order-router:
+    <<: *py
+    command: python -m execution.router
+    # ⚠️ ÚNICO servicio con la clave de trading. ÚNICO que envía órdenes.
+    # La clave del exchange tiene TRADE habilitado y RETIROS DESHABILITADOS,
+    # más IP allowlist. Eso es la capa 0 de la seguridad; todo lo demás es
+    # defensa en profundidad.
+    secrets: [trading_keys]
+    deploy: { replicas: 1 }   # nunca más de uno
+    # Los checks pre-trade son una LIBRERÍA IN-PROCESS (risk/pretrade.py),
+    # no un servicio HTTP: un check que puede hacer timeout falla abierto
+    # justo cuando importa.
+    networks: [data]          # NO en `proxy`
+
+  risk-monitor:
+    <<: *py
+    command: python -m risk.monitor
+    # Observa y frena (drawdown, correlación, kill switch global).
+    # No autoriza cada orden: eso lo hace la librería in-process del router.
+
+  reconciler:
+    <<: *py
+    command: python -m execution.reconcile --loop
+    # Clave SOLO-LECTURA: el reconciler compara, no corrige enviando órdenes.
+    # Si detecta un delta por encima del umbral, escribe un risk_event y activa
+    # el modo seguro; la corrección la hace un humano o el order-router.
+    secrets: [account_ro_keys]
+    # Gate de arranque + bucle cada 5-15 min. El exchange siempre gana en posición.
+
+  # --- INTELIGENCIA -----------------------------------------------------------
+  llm-analyst:
+    <<: *py
+    command: python -m llm.worker
+    secrets: [llm_keys]       # ⚠️ CERO claves de exchange, deliberadamente
+    cpus: 2.0
+    mem_limit: 4g
+    pids_limit: 256
+    # Nunca en el camino crítico de una orden.
+
+  ollama:
+    # Último escalón del fallback ladder: un modelo local que nunca da 429.
+    # Corre 7-14B en CPU/iGPU. Una GPU dedicada 24/7 cuesta $200-650/año de luz
+    # en Puerto Rico, que a $10k de capital es 2-6% anual de drag.
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes: [./ollama:/root/.ollama]
+    networks: [data]
+    # Descomenta solo si tienes GPU dedicada y has decidido pagar esa luz:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices: [{ driver: nvidia, count: 1, capabilities: [gpu] }]
+
+  # --- PRESENTACIÓN -----------------------------------------------------------
+  api:
+    <<: *py
+    build: { context: .., dockerfile: docker/Dockerfile.api }
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8000
+    # SOLO LECTURA sobre el ledger. Los únicos POST: kill switch y aprobación.
+    networks: [data, proxy]
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.api.rule: "Host(`bot.lab.${DOMAIN}`) && PathPrefix(`/api`)"
+      traefik.http.routers.api.tls.certresolver: le
+      traefik.http.routers.api.middlewares: "tailscale-auth@file"
+      traefik.http.services.api.loadbalancer.server.port: "8000"
+
+  web:
+    build: { context: .., dockerfile: docker/Dockerfile.web }
+    restart: unless-stopped
+    networks: [proxy]
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.web.rule: "Host(`bot.lab.${DOMAIN}`)"
+      traefik.http.routers.web.tls.certresolver: le
+      traefik.http.routers.web.middlewares: "tailscale-auth@file"
+
+  scheduler:
+    image: mcuadros/ofelia:latest
+    restart: unless-stopped
+    depends_on: [postgres]
+    command: daemon --docker
+    volumes: [/var/run/docker.sock:/var/run/docker.sock:ro]
+    networks: [data]
+    labels:
+      # Motor nocturno de hipótesis (Batch API, -50%)
+      ofelia.job-run.hypotheses.schedule: "0 30 3 * * *"
+      ofelia.job-run.hypotheses.image: "trading-engine:latest"
+      ofelia.job-run.hypotheses.command: "python -m llm.hypothesis.nightly"
+      # Reconciliación de refuerzo
+      ofelia.job-run.reconcile.schedule: "0 */10 * * * *"
+      ofelia.job-run.reconcile.image: "trading-engine:latest"
+      ofelia.job-run.reconcile.command: "python -m execution.reconcile --once"
+      # Export a Parquet (tier frío) + game-day de restauración mensual
+      ofelia.job-run.archive.schedule: "0 0 4 * * *"
+      ofelia.job-run.archive.image: "trading-engine:latest"
+      ofelia.job-run.archive.command: "python -m ops.archive_to_parquet"
+
+  # --- ENERGÍA  (no opcional en Puerto Rico) ----------------------------------
+  nut-upsd:
+    image: instantlinux/nut-upsd:latest
+    restart: unless-stopped
+    devices: ["/dev/bus/usb:/dev/bus/usb"]
+    networks: [data]
+    # Al pasar a batería: publica evento en el bus → estrategias a reduce-only
+    # → apagado limpio de Postgres.
+    # El UPS te compra 40 minutos. Un apagón de LUMA puede durar días — y por eso
+    # los stops del lado del exchange no son negociables.
+
+  # --- BACKUPS ----------------------------------------------------------------
+  pgbackrest:
+    build: { context: ../ops/backup, dockerfile: Dockerfile.pgbackrest }
+    restart: unless-stopped
+    depends_on: { postgres: { condition: service_healthy } }
+    volumes:
+      - pgdata:/home/postgres/pgdata:ro
+      - ../ops/backup/pgbackrest.conf:/etc/pgbackrest/pgbackrest.conf:ro
+    networks: [data]
+    # Full semanal + incremental diario + WAL continuo → PITR al segundo.
+    # ⚠️ Los chunks comprimidos de Timescale van bien con backup FÍSICO.
+    #    Con pg_dump/pg_restore DEBES usar timescaledb_pre_restore()/post_restore()
+    #    o la restauración queda corrupta. Prueba el método antes de confiar en él.
+
+  restic-backup:
+    image: restic/restic:latest
+    restart: "no"
+    entrypoint: ["/bin/sh", "/scripts/restic.sh"]
+    volumes:
+      - ../ops/backup:/scripts:ro
+      - parquet-archive:/archive:ro
+      - traefik-acme:/acme:ro
+    env_file: [../config/restic.env]
+    networks: [obs]
+    # T0 (<100 MB, RPO 0): secretos cifrados, compose, acme.json, dump del ledger
+    # T2 IRREEMPLAZABLE: tu tape de liquidaciones, snapshots de OI, archivo de noticias
+    # T3 NO respaldar: velas y trades, re-descargables de los exchanges
+
+# =============================================================================
+# NO EN ESTE HOST — $5-10/mo en un VPS fuera de la isla:
+#   · dead-man's switch (las alertas sobre tu host no pueden depender de tu host)
+#   · agente flatten-only con una clave reduce-only
+# Drásticamente más barato que hacer HA un homelab en Puerto Rico.
+# =============================================================================
