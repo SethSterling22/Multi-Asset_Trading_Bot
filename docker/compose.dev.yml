@@ -1,8 +1,9 @@
-# Postgres + TimescaleDB SOLO para desarrollo y tests del ledger.
+# Postgres + TimescaleDB y Redis SOLO para desarrollo y tests.
 # Misma imagen que docker/compose.yml para no probar contra otra versión.
 #
 #   docker compose -f docker/compose.dev.yml up -d
 #   export TEST_DATABASE_URL=postgresql+psycopg://trading@127.0.0.1:5433/postgres
+#   export REDIS_URL=redis://127.0.0.1:6380/0
 #
 # Sin contraseña (trust) y escuchando SOLO en 127.0.0.1: no es alcanzable desde la
 # red y no hay secreto que filtrar. Nunca uses esta configuración fuera de tu máquina.
@@ -23,6 +24,18 @@ services:
       test: ["CMD-SHELL", "pg_isready -U trading -d trading"]
       interval: 5s
       timeout: 5s
+      retries: 20
+
+  # Fuente Redis del kill switch (risk/breakers.py). Sin persistencia: en desarrollo
+  # una clave de parada que sobrevive a un reinicio confunde más de lo que protege.
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
       retries: 20
 
 volumes:

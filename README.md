@@ -7,8 +7,9 @@ to maximise any single strategy's Sharpe but to keep the strategies
 
 **Status: migrating from scaffold to platform.** The repo is following the plan
 in [docs/INFORME_TALOS.md](docs/INFORME_TALOS.md). Session 0 (layout, tooling,
-CI, risk floor guard) and Session 1 (Phase 0.1–0.2: ledger, metrics, structured
-logging) are done; Session 2 (real delta, shared guards) is next. The
+CI, risk floor guard), Session 1 (Phase 0.1–0.2: ledger, metrics, structured
+logging) and Session 2 (Phase 0.3–0.6: real delta, shared guards, breakers,
+kill switch) are done; Session 3 (honest backtest, data recorder) is next. The
 only runnable code is still the legacy scaffold below, and **it is not fit for
 live capital** (see [Known gaps](#known-gaps-in-the-legacy-code)).
 
@@ -38,18 +39,19 @@ live capital** (see [Known gaps](#known-gaps-in-the-legacy-code)).
 | `docs/schema_reference.sql` | Reference DDL; the real DDL goes in `migrations/` (Alembic) |
 | `docs/dashboard_mockup.html` | Visual reference for the new dashboard |
 | [core/risk_floor.py](core/risk_floor.py) | Risk limits as **Python constants**, hash-verified. Never config |
-| `core/`, `brokers/`, `data/`, `strategies/`, `execution/`, `risk/`, `llm/`, `api/`, `web/`, `backtest/` | Target package tree (informe §9.2), still empty |
+| `core/`, `risk/`, `strategies/` | In use: config, ledger, greeks, metrics, logging; pre-trade checks, breakers, kill switch, LLM action space; the strategies and their shared guards (`strategies/base.py`) |
+| `brokers/`, `data/`, `execution/`, `llm/`, `api/`, `web/`, `backtest/` | Rest of the target tree (informe §9.2), still empty |
 | `tests/guards/` | Guard tests that must never fail; required to merge |
 | `docker/compose.yml` | Homelab stack (Compose + Traefik), reference for Phase 1 |
 
-Legacy scaffold at the repo root, to be refactored into the tree above:
+The original scaffold moved into the tree in Session 2:
 
-| File | Becomes | Session |
-|---|---|---|
-| `config_models.py` + `config.json` | `core/config/` + Postgres params; risk limits move to `core/risk_floor.py` | 1–2 |
-| `wheel_strategy.py` | `strategies/wheel/` | 2 |
-| `crypto_rebalancer.py` | `strategies/crypto_rebalance/` | 2 |
-| `app_dashboard.py` (Streamlit) | `core/metrics.py` + FastAPI/HTMX dashboard; then deleted | 1, 7 |
+| Was | Now |
+|---|---|
+| `config_models.py` | `core/config/models.py` (a shim at the root keeps `app_dashboard.py` working) |
+| `wheel_strategy.py` | `strategies/wheel/logic.py` (the cycle, behind an `OptionsBroker` port) + `strategies/wheel/strategy.py` (the Lumibot adapter) |
+| `crypto_rebalancer.py` | `strategies/crypto_rebalance/rebalancer.py` |
+| `app_dashboard.py` (Streamlit) | Still at the root; `compute_metrics` is now `core/metrics.py`; deleted in Session 7 |
 
 ---
 
@@ -84,16 +86,27 @@ Without `TEST_DATABASE_URL` the `db` tests fail instead of being skipped; run
 database URL from `DATABASE_URL` only, never from `alembic.ini`. Each service installs only its own dependency group
 (`uv sync --no-default-groups --group engine`).
 
-### Running the legacy scaffold (paper only)
+### Running the strategies (paper only)
 
 ```bash
 cp .env.example .env            # Alpaca paper keys; see RUNNING.md §3
-mkdir -p logs
-uv run python config_models.py          # validates config.json
-uv run python crypto_rebalancer.py      # dry-run demo with the simulated broker
-uv run streamlit run app_dashboard.py   # legacy panel at localhost:8501
-uv run python wheel_strategy.py         # Wheel engine, paper by default
+uv run python -m core.config.models        # validates config.json
+uv run python -m strategies.crypto_rebalance   # dry-run demo with the simulated broker
+uv run streamlit run app_dashboard.py      # legacy panel at localhost:8501
 ```
+
+The Wheel refuses to start without its ledger and kill switch:
+
+```bash
+docker compose -f docker/compose.dev.yml up -d   # Postgres :5433 and Redis :6380
+export DATABASE_URL=postgresql+psycopg://trading@127.0.0.1:5433/trading
+export REDIS_URL=redis://127.0.0.1:6380/0
+DATABASE_URL=$DATABASE_URL uv run alembic upgrade head
+uv run python -m strategies.wheel          # paper by default
+```
+
+Importing Lumibot loads `.env` and opens a broker socket on its own, so only
+import `strategies.wheel.strategy` where that is intended.
 
 `live_trading_mode` is `false` in `config.json`, so the engine uses Alpaca's
 paper endpoint and the rebalancer stays in dry-run. Keep it that way: going live
@@ -120,28 +133,31 @@ exchange-resident stops, fail-closed kill switch) are in [CLAUDE.md](CLAUDE.md) 
 
 ---
 
-## Known gaps in the legacy code
+## Known gaps
 
-Found in the Session 0 audit. They are fixed by the refactor in Sessions 1–2,
-not patched in place:
+Found in the Session 0 audit. **Fixed in Session 2**, each with a test in
+`tests/guards/`:
 
-- **The Wheel's circuit breaker never fires.** `on_abnormal_market_conditions`
-  is not a Lumibot lifecycle hook.
-- **The 80% early close stops working after a restart.** Entry premiums live
-  only in memory.
-- **The daily loss limit fails open** if the engine starts or restarts
-  mid-session.
-- **Cash-secured puts are checked per order, not in aggregate.** Several
-  whitelisted symbols can count the same cash as collateral.
-- **Orders are market orders, and pending orders are not tracked**, so an
-  unfilled sell or close can be resubmitted on the next iteration.
-- **Rebalancer buys are each capped at USDC, not in total.** Two buys can add
-  up to more than the available USDC; the simulated broker allows negative
-  balances, so it would not notice.
-- **The delta fallback is a moneyness proxy, not a delta.** It must be replaced
-  before contract selection can be trusted (Phase 0.3).
-- **The legacy dashboard reads `logs/*.csv` that nothing writes**, and its
-  "live trading" toggle only takes effect when the engine restarts.
+- The Wheel's dead circuit breaker hook is gone; the breakers in
+  `risk/breakers.py` replace it.
+- The 80% early close reads the entry premium from the ledger, so it survives a
+  restart.
+- The daily and weekly loss limits use the first `equity_curve` snapshot of the
+  day/week and **fail closed** when there is none.
+- Cash-secured puts count the collateral of every open and pending CSP.
+- Pending orders are tracked: an unfilled sell or close is not resubmitted.
+- Rebalancer buys are capped at the USDC in total, and the simulated broker
+  refuses an overspend or an oversell.
+- The moneyness proxy is deleted: delta comes from the broker or from
+  Black-Scholes with implied volatility, or the trade is skipped and logged.
+
+**Still open:**
+
+- Orders are still market orders (Session 5, execution).
+- The Lumibot adapter (`strategies/wheel/strategy.py`) has never run against a
+  broker; only the logic behind it is tested.
+- The legacy dashboard reads `logs/*.csv` that nothing writes, and its "live
+  trading" toggle only takes effect when the engine restarts (Session 7).
 
 [RUNNING.md](RUNNING.md) §0 has the same list and what blocks live trading.
 

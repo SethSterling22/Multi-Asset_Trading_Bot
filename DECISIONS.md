@@ -167,3 +167,84 @@ informe; aquí queda el resumen y la sección donde se justifica cada una.
   conocidos. Se cierra con la reconciliación (Sesión 5).
 - **Siguiente:** Sesión 2 (Fase 0.3–0.6): delta real, `strategies/base.py`, los 10
   grupos de `tests/guards/` y `risk/breakers.py`.
+
+---
+
+## 2026-11-01 · D-006 · Sesión 2: delta real, guards comunes, breakers y kill switch
+
+- **Contexto:** Fase 0.3–0.6. Primera sesión que toca el Wheel y el rebalanceador.
+- **Decisiones:**
+  1. **El Wheel detrás de un puerto.** `strategies/wheel/logic.py` contiene el ciclo
+     y habla con el broker por el Protocol `OptionsBroker` (el patrón de
+     `SpotBroker`); `strategy.py` es solo el adaptador de Lumibot. Así los guards se
+     prueban sin broker. **El adaptador no tiene tests contra Lumibot real.**
+  2. **Delta:** broker → Black-Scholes con IV del precio de mercado → se salta con
+     `reason='no_greeks'`. La banda de sanidad no es un número a mano: es el rango
+     de deltas que Black-Scholes admite para esa moneyness con σ entre 1% y 500%,
+     más 0.02 por dividendos y ejercicio americano. Sin dividendos (q=0). Un precio
+     igual al valor intrínseco no da IV (no informa de la volatilidad).
+  3. **Colateral de una CSP:** `max_collateral_pct_per_trade = 0.20` (nuevo campo,
+     con tope en `MAX_NOTIONAL_PCT_EQUITY`). Sustituye al `max(limit * 10, limit)`
+     del código viejo, que con el 0.02 de `config.json` daba el mismo 20% con un
+     ×10 escondido. **Mismo riesgo que antes**, ahora explícito. El floor permitiría
+     25%; no se afloja sin aprobación.
+  4. **`daily_loss_limit_percentage` acotado por `DAILY_LOSS_STOP_PCT`** en el
+     modelo: la config solo puede ser más estricta que el floor.
+     `max_portfolio_risk_per_trade` queda como está (0.02) y **no lo aplica** ninguna
+     de las dos estrategias: el Wheel no tiene stop y lo acota el colateral; el
+     floor (1%) lo aplica `risk/pretrade.py` a los sleeves con stop.
+  5. **Pérdida diaria y semanal persistidas:** la referencia es el primer snapshot
+     de `equity_curve` del día (America/New_York para el Wheel) o de la semana. Sin
+     snapshot, **no se opera**. El Wheel escribe el snapshot antes del gate en
+     cada iteración.
+  6. **Kill switch:** las tres fuentes son argumentos obligatorios; `config.json`
+     es una cuarta fuente que solo puede activar. Un error al comprobar cualquiera
+     cuenta como activo, también una config ilegible.
+  7. **Breakers como funciones puras sobre la historia persistida** (órdenes,
+     fills, equity), no contadores en memoria: un reinicio no los resetea. Los
+     umbrales sin número en el floor ni en el informe (rechazos seguidos, spread
+     frente a ATR) se pasan explícitamente al construir cada política.
+  8. **Espacio de acción del LLM** (`risk/monotone.py`): `Intent`, `SizeMultiplier`
+     con factory validada y `apply_effect` para los 8 `effect_kind`. Es la segunda
+     de las tres capas de CLAUDE.md §1.2; los CHECK de `hypothesis` llegan con su
+     migración (Sesión 8–9).
+  9. **El Wheel exige `DATABASE_URL` y `REDIS_URL` para arrancar.** Sin ledger no
+     hay registro, y sin las tres fuentes no hay kill switch. `docker/compose.dev.yml`
+     añade Redis en 127.0.0.1:6380.
+- **Bugs encontrados por los tests nuevos** (corregidos):
+  - Una whitelist o `monitored_assets` de solo espacios (`["  "]`) pasaba la
+    validación: `min_length` se comprueba antes de limpiar. En el rebalanceador era
+    una división por cero.
+  - `implied_vol` devolvía σ = 1% para un precio 0 o igual al intrínseco.
+- **El comando del gate del prompt no mide `strategies/base.py`:** `--cov` recibe
+  un nombre de módulo, y con `--cov=strategies/base.py` coverage avisa "never
+  imported" y lo omite. El gate se corre con `--cov=strategies.base`.
+- **Lumibot 4.6.32**, el que fija `uv.lock` (el `.venv` anterior tenía 4.5.83). Al
+  importarlo lee `.env` y abre un socket del broker: importar el adaptador del Wheel
+  tiene efectos aunque no se arranque la estrategia.
+
+---
+
+## 2026-11-01 · D-007 · Gate de la Sesión 2 (Fase 0.3–0.6): verde
+
+- `pytest -m guards --cov=risk --cov=strategies.base --cov-branch
+  --cov-fail-under=100`: 222 passed, **100% de líneas y ramas** en `risk/` y
+  `strategies/base.py`.
+- Sin greeks y sin IV ⇒ 0 órdenes y 1 log de rechazo con `reason='no_greeks'`
+  (`test_no_greeks_and_no_iv_means_zero_orders_and_one_rejection`).
+- Los 10 grupos de CLAUDE.md §1.8 pasan contra la base: CSP sin caja (incluido el
+  colateral agregado y pendiente), CC sin 100 acciones, pérdida diaria, kill
+  switch, venta > holdings, compra > USDC (en conjunto), permutaciones inválidas de
+  config, monotonía del LLM, distancia a liquidación, cap ajustado por correlación.
+- **"Cada test debe fallar si comento la línea del guard":** comprobado con
+  mutantes. Se quita cada `return Rejected(...)`, `raise EffectRejectedError(...)`,
+  `return NoDelta(...)` y `self.reject(...)` de base, pretrade, breakers, monotone,
+  greeks y la lógica del Wheel, uno a uno: **55 de 56 mutantes hacen fallar algún
+  test.** El superviviente es la red final de `apply_effect` para un `effect_kind`
+  sin rama, inalcanzable mientras los 8 tengan rama; si se añade un noveno, falla
+  `test_vocabulary_mirrors_the_schema_enum`.
+- `pytest -m "not integration"` (con Postgres): 286 passed. `ruff` y `mypy` (strict
+  en `core`, `risk`, `strategies/base.py` y `strategies/wheel/logic.py`) limpios.
+- **Siguiente:** Sesión 3 (Fase 0.7–0.8): backtest con DSR, PBO y N registrado, y
+  el grabador de liquidaciones y OI. El grabador depende del punto 9 de la §13
+  (Coinalyze), sin verificar.
