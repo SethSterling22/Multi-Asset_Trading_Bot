@@ -13,5 +13,7 @@ jobs:
       - uses: astral-sh/setup-uv@v10.3.3  # sin tag flotante de major: se fija la versión
       - name: Instalar dependencias de desarrollo
         run: uv sync --locked --no-default-groups --group dev
-      - name: pytest -m guards
-        run: uv run --no-sync pytest -m guards
+      - name: pytest -m guards, con 100% de ramas en risk/ y strategies/base.py
+        run: >
+          uv run --no-sync pytest -m guards
+          --cov=risk --cov=strategies.base --cov-branch --cov-fail-under=100

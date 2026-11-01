@@ -3,8 +3,8 @@
 This is the operational runbook. Follow it in order. Phases are sequential
 by design: skipping ahead is how accounts get damaged.
 
-It covers the **legacy scaffold** at the repo root (`wheel_strategy.py`,
-`crypto_rebalancer.py`, `app_dashboard.py`). The platform that replaces it is
+It covers the two existing strategies (`strategies/wheel/`,
+`strategies/crypto_rebalance/`) and the legacy `app_dashboard.py`. The platform is
 specified in [docs/INFORME_TALOS.md](docs/INFORME_TALOS.md); its phase gates
 (§10) are the ones that decide whether anything touches real money. This
 runbook gains the homelab, DR and incident runbooks in Session 10 of
@@ -19,41 +19,30 @@ deployment, know exactly what is implemented and what still needs to be built.
 
 | Component | Status |
 |---|---|
-| `config_models.py` — validation and atomic persistence | Works; moves to `core/config/` |
-| `crypto_rebalancer.py` — rebalancing logic + `PaperSpotBroker` | Simulated broker only; buys not capped in aggregate |
+| `core/config/models.py` — validation and atomic persistence | Works; bounds import the risk floor |
+| `strategies/crypto_rebalance/` — rebalancing logic + `PaperSpotBroker` | Simulated broker only; shared guards applied |
 | `app_dashboard.py` — Streamlit panel | Reads CSVs that nothing writes; retired in Session 7 |
-| `wheel_strategy.py` — Wheel lifecycle and safety guards | Runs, but several guards are unreliable (see below) |
-| Delta estimation from broker greeks | **Fallback is a moneyness proxy, not a delta — must be replaced** |
+| `strategies/wheel/` — Wheel cycle and Lumibot adapter | Logic tested behind a fake broker; **the adapter has never run against Alpaca** |
+| Delta (`core/greeks.py`) | Broker greeks → Black-Scholes with IV → skip and log. Never guessed |
+| Ledger (`fills`, `orders`, `equity_curve`) | Done (Phase 0.1); the Wheel writes fills and equity |
+| Kill switch + breakers + pre-trade checks (`risk/`) | Done (Phase 0.5); 100% branch coverage |
 | Live broker adapters (Alpaca Crypto / Coinbase Advanced / perps) | **Not implemented** |
-| Ledger (`fills`, `orders`, `equity_curve`) | **Not implemented** (Phase 0.1) |
 | Hedged spread strategy module | **Not implemented** (parameters exist in config) |
 | LLM routing / analysis agents | **Not implemented** (Phase 3) |
-| Risk floor (`core/risk_floor.py`) + its guard test | Done; not yet wired into any service |
 
-**Known gaps in the legacy code** (Session 0 audit; fixed by the refactor in
-Sessions 1–2, not patched in place):
-
-- The Wheel's circuit breaker never fires: `on_abnormal_market_conditions` is
-  not a Lumibot lifecycle hook.
-- The 80% early close stops working after a restart: entry premiums live only
-  in memory.
-- The daily loss limit fails open if the engine starts or restarts
-  mid-session.
-- Cash-secured puts are checked per order, not in aggregate: several
-  whitelisted symbols can count the same cash as collateral.
-- Orders are market orders and pending orders are not tracked, so an unfilled
-  sell or close can be resubmitted on the next iteration.
-- Rebalancer buys are each capped at USDC, not in total; the simulated broker
-  allows negative balances, so it would not notice.
+**Session 0 audit gaps:** fixed in Session 2, each with a guard test (dead
+circuit breaker hook, early close lost on restart, daily loss failing open,
+per-order cash check, untracked pending orders, per-buy USDC cap, moneyness
+delta). See README "Known gaps" for the list and what is still open.
 
 **Blocking items before any live trading:**
 
-1. Replace `_estimate_delta()`'s no-greeks fallback in `wheel_strategy.py`.
-   If the broker has no greeks and there is no implied volatility, the trade
-   is skipped and logged — never guessed (Phase 0.3).
-2. Build the ledger, so there is a performance record to evaluate (Phase 0.1).
-3. Fix every gap above, with a test in `tests/guards/` for each.
-4. Implement a real `SpotBroker` adapter if you intend to trade crypto.
+1. Run the Wheel's Lumibot adapter in **paper** and check that fills reach the
+   ledger and that `equity_curve` gets a snapshot every iteration. It has never
+   run against a broker.
+2. Replace market orders with limit orders and add the write-ahead order intent
+   (Session 5, execution).
+3. Implement a real `SpotBroker` adapter if you intend to trade crypto.
 
 Everything below assumes these are addressed before Phase 3.
 
@@ -171,7 +160,7 @@ Open `config.json` and verify:
 }
 ```
 
-`live_trading_mode: false` is what keeps `wheel_strategy.py` pointed at
+`live_trading_mode: false` is what keeps the Wheel pointed at
 Alpaca's paper endpoint and the rebalancer in dry-run.
 
 ---
@@ -200,14 +189,14 @@ uv run python -m scripts.synthetic_fills --database-url "$TEST_DATABASE_URL"
 
 ```bash
 # 1. Configuration is valid and parses
-uv run python config_models.py
+uv run python -m core.config.models
 # Expected: "config.json is valid ✔" followed by the parsed config
 ```
 
 ```bash
 # 2. Rebalancing logic runs against the simulated broker
-uv run python crypto_rebalancer.py
-# Expected: DRY-RUN log lines for the drifted demo portfolio,
+uv run python -m strategies.crypto_rebalance
+# Expected: JSON log lines with mode "dry_run" for the drifted demo portfolio,
 #           then a total value line. No orders executed.
 ```
 
@@ -263,15 +252,22 @@ observe a full Wheel rotation including assignment.
 
 ### Launch
 
+The Wheel needs the ledger (Postgres) and the kill switch's Redis source, and
+refuses to start without them (§4, step 0b brings both up):
+
 ```bash
-uv run python wheel_strategy.py
+export DATABASE_URL=postgresql+psycopg://trading@127.0.0.1:5433/trading
+export REDIS_URL=redis://127.0.0.1:6380/0
+DATABASE_URL=$DATABASE_URL uv run alembic upgrade head
+uv run python -m strategies.wheel
 ```
 
 To keep it running after closing the terminal:
 
 ```bash
 # Simple approach
-nohup uv run python wheel_strategy.py > logs/engine.log 2>&1 &
+mkdir -p logs
+nohup uv run python -m strategies.wheel > logs/engine.log 2>&1 &
 
 # Better for long-running deployments: a systemd service (Linux)
 # or a process manager such as supervisor / pm2. Phase 1 moves this to
@@ -288,7 +284,7 @@ uv run streamlit run app_dashboard.py
 
 - Check the dashboard: balance, daily P&L, open positions.
 - Scan `logs/engine.log` for `WARNING` and `ERROR` lines.
-- Confirm the engine is still alive (`ps aux | grep wheel_strategy`).
+- Confirm the engine is still alive (`ps aux | grep strategies.wheel`).
 
 ### Weekly routine (30 minutes)
 
@@ -390,7 +386,7 @@ condition to move on.
 
    ```bash
    # Stop the running process, then
-   uv run python wheel_strategy.py
+   uv run python -m strategies.wheel
    ```
 
    `live_trading_mode` is only read at startup. Until you restart, the engine
@@ -419,16 +415,29 @@ The engine picks up the change on its next iteration (within 15 minutes by
 default) and stops submitting orders. For an immediate stop, kill the process:
 
 ```bash
-pkill -f wheel_strategy.py
+pkill -f strategies.wheel
 ```
 
 Note that the kill switch stops *new* orders; it does not close existing
 positions. Closing them is a manual decision.
 
-Today the kill switch is a single flag in `config.json`. The target design
-(CLAUDE.md §1.7) is fail-closed and triple redundant: a row in `risk_events`,
-a Redis key, or the file `/run/trading/HALT`, and an error while checking
-counts as halted.
+The kill switch is fail-closed and triple redundant (CLAUDE.md §1.7): it is
+on if **any** of these says so, and an error while checking one counts as on.
+Any of them stops new orders on the next iteration:
+
+```bash
+sudo mkdir -p /run/trading && sudo touch /run/trading/HALT     # everything
+sudo touch /run/trading/HALT.wheel                            # only the Wheel
+redis-cli -p 6380 SET trading:halt 1                          # everything
+psql -h 127.0.0.1 -p 5433 -U trading -d trading -c \
+  "INSERT INTO risk_events (kind, scope, reason, actor)
+   VALUES ('kill_switch_on', 'global', 'manual', 'human:sebastian')"
+```
+
+The `config.json` flag from the dashboard is a fourth source on top of those
+three. To lift a stop, remove the file or the key, or insert a
+`kill_switch_off` row for the same scope. Never delete a `risk_events` row: the
+table is append-only and the database refuses.
 
 ### Adjusting parameters live
 

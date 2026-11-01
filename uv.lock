@@ -2529,6 +2529,7 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "psycopg", extra = ["binary"] },
+    { name = "pydantic" },
     { name = "sqlalchemy" },
     { name = "structlog" },
 ]
@@ -2554,7 +2555,6 @@ engine = [
     { name = "coinbase-advanced-py" },
     { name = "lumibot" },
     { name = "pandas" },
-    { name = "pydantic" },
     { name = "python-dotenv" },
     { name = "redis" },
 ]
@@ -2570,6 +2570,7 @@ llm = [
 [package.metadata]
 requires-dist = [
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
+    { name = "pydantic", specifier = ">=2.7" },
     { name = "sqlalchemy", specifier = ">=2.0" },
     { name = "structlog", specifier = ">=24.4" },
 ]
@@ -2595,7 +2596,6 @@ engine = [
     { name = "coinbase-advanced-py", specifier = ">=1.7" },
     { name = "lumibot", specifier = ">=3.8" },
     { name = "pandas", specifier = ">=2.2" },
-    { name = "pydantic", specifier = ">=2.7" },
     { name = "python-dotenv", specifier = ">=1.0" },
     { name = "redis", specifier = ">=5.0" },
 ]
