@@ -3,34 +3,57 @@
 This is the operational runbook. Follow it in order. Phases are sequential
 by design: skipping ahead is how accounts get damaged.
 
+It covers the **legacy scaffold** at the repo root (`wheel_strategy.py`,
+`crypto_rebalancer.py`, `app_dashboard.py`). The platform that replaces it is
+specified in [docs/INFORME_TALOS.md](docs/INFORME_TALOS.md); its phase gates
+(§10) are the ones that decide whether anything touches real money. This
+runbook gains the homelab, DR and incident runbooks in Session 10 of
+[docs/PROMPTS_CLAUDE_CODE.md](docs/PROMPTS_CLAUDE_CODE.md).
+
 ---
 
 ## 0. Reality check — what works today
 
-This repository is a **scaffold**. Before planning a live deployment, know
-exactly what is implemented and what still needs to be built.
+This repository is a **scaffold in migration**. Before planning a live
+deployment, know exactly what is implemented and what still needs to be built.
 
 | Component | Status |
 |---|---|
-| `config_models.py` — validation and atomic persistence | Complete |
-| `crypto_rebalancer.py` — rebalancing logic + `PaperSpotBroker` | Complete (simulated broker only) |
-| `app_dashboard.py` — Streamlit panel | Complete (reads CSVs that nothing writes yet) |
-| `wheel_strategy.py` — Wheel lifecycle and safety guards | Complete, with one caveat below |
-| Delta estimation from broker greeks | **Fallback is a crude placeholder — must be replaced** |
-| Live broker adapters (Alpaca Crypto / Coinbase Advanced) | **Not implemented** |
-| Log writer (`logs/equity.csv`, `logs/trades.csv`) | **Not implemented** |
+| `config_models.py` — validation and atomic persistence | Works; moves to `core/config/` |
+| `crypto_rebalancer.py` — rebalancing logic + `PaperSpotBroker` | Simulated broker only; buys not capped in aggregate |
+| `app_dashboard.py` — Streamlit panel | Reads CSVs that nothing writes; retired in Session 7 |
+| `wheel_strategy.py` — Wheel lifecycle and safety guards | Runs, but several guards are unreliable (see below) |
+| Delta estimation from broker greeks | **Fallback is a moneyness proxy, not a delta — must be replaced** |
+| Live broker adapters (Alpaca Crypto / Coinbase Advanced / perps) | **Not implemented** |
+| Ledger (`fills`, `orders`, `equity_curve`) | **Not implemented** (Phase 0.1) |
 | Hedged spread strategy module | **Not implemented** (parameters exist in config) |
-| LLM routing / analysis agents | **Not implemented** |
+| LLM routing / analysis agents | **Not implemented** (Phase 3) |
+| Risk floor (`core/risk_floor.py`) + its guard test | Done; not yet wired into any service |
+
+**Known gaps in the legacy code** (Session 0 audit; fixed by the refactor in
+Sessions 1–2, not patched in place):
+
+- The Wheel's circuit breaker never fires: `on_abnormal_market_conditions` is
+  not a Lumibot lifecycle hook.
+- The 80% early close stops working after a restart: entry premiums live only
+  in memory.
+- The daily loss limit fails open if the engine starts or restarts
+  mid-session.
+- Cash-secured puts are checked per order, not in aggregate: several
+  whitelisted symbols can count the same cash as collateral.
+- Orders are market orders and pending orders are not tracked, so an unfilled
+  sell or close can be resubmitted on the next iteration.
+- Rebalancer buys are each capped at USDC, not in total; the simulated broker
+  allows negative balances, so it would not notice.
 
 **Blocking items before any live trading:**
 
 1. Replace `_estimate_delta()`'s no-greeks fallback in `wheel_strategy.py`.
-   The current approximation is a rough moneyness proxy, not a real delta.
-   Either confirm your broker always returns greeks, or compute them
-   properly (Black-Scholes with implied volatility).
-2. Implement the log writer, or the dashboard will stay empty and you will
-   have no performance record to evaluate.
-3. Implement a real `SpotBroker` adapter if you intend to trade crypto.
+   If the broker has no greeks and there is no implied volatility, the trade
+   is skipped and logged — never guessed (Phase 0.3).
+2. Build the ledger, so there is a performance record to evaluate (Phase 0.1).
+3. Fix every gap above, with a test in `tests/guards/` for each.
+4. Implement a real `SpotBroker` adapter if you intend to trade crypto.
 
 Everything below assumes these are addressed before Phase 3.
 
@@ -52,6 +75,8 @@ Everything below assumes these are addressed before Phase 3.
   pyenv install 3.12 && pyenv local 3.12             # if using pyenv
   ```
 
+- **[uv](https://docs.astral.sh/uv/)** — manages the environment and
+  dependencies from `pyproject.toml` and `uv.lock`.
 - **git** (optional, for version control)
 - A machine that can stay online during market hours — your own computer is
   fine for paper trading; consider a small VPS for live operation.
@@ -67,23 +92,18 @@ No capital is required for Phases 1 and 2.
 ```bash
 cd /path/to/Multi-Asset_Trading_Bot
 
-# Create an isolated environment (keeps this project's packages separate)
-python3 -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
+# Create .venv with Python 3.12 and install every dependency group
+uv sync
+uv run python --version            # must report 3.12.x
 
-# Confirm the interpreter before installing anything
-python --version                   # must report 3.12.x
-
-# Install dependencies
-pip install --upgrade pip
-pip install -r requirements.txt
+# Commit hooks: ruff + gitleaks
+uv run pre-commit install
 
 # Create the directory the dashboard reads from
 mkdir -p logs
 ```
 
-Re-activate the environment (`source .venv/bin/activate`) in every new
-terminal session before running anything.
+Prefix every command with `uv run`; it uses `.venv` without activating it.
 
 ---
 
@@ -101,6 +121,10 @@ terminal session before running anything.
 5. Options are enabled by default in paper. No approval needed to test.
 
 ### 3.2 Coinbase (crypto — skip if not trading crypto)
+
+Before relying on Coinbase or Kraken, confirm Puerto Rico is in each one's
+supported regions. It is point 1 of the informe's §13 checklist and is still
+unverified.
 
 1. Create a standard account at **coinbase.com** and complete KYC.
 2. Go to the **Coinbase Developer Portal** (portal.cdp.coinbase.com), signing
@@ -132,7 +156,8 @@ COINBASE_CDP_PRIVATE_KEY=
 
 `.env` is already listed in `.gitignore`. Never commit it, never paste keys
 into chat, screenshots, or issue trackers. Bots scan public repositories for
-leaked keys within minutes.
+leaked keys within minutes. The gitleaks commit hook is the backstop. `.env` on
+disk is temporary: Phase 1.2 replaces it with SOPS + age decrypted to tmpfs.
 
 ### 3.4 Confirm paper mode
 
@@ -156,21 +181,29 @@ Alpaca's paper endpoint and the rebalancer in dry-run.
 Run these in order. Each one should pass before moving on.
 
 ```bash
+# 0. Guard tests, lint and types (the same checks CI and merges require)
+uv run pytest -m guards
+uv run ruff check .
+uv run mypy core risk
+# Expected: all green. If a guard test fails, the change is wrong, not the test.
+```
+
+```bash
 # 1. Configuration is valid and parses
-python config_models.py
+uv run python config_models.py
 # Expected: "config.json is valid ✔" followed by the parsed config
 ```
 
 ```bash
 # 2. Rebalancing logic runs against the simulated broker
-python crypto_rebalancer.py
+uv run python crypto_rebalancer.py
 # Expected: DRY-RUN log lines for the drifted demo portfolio,
 #           then a total value line. No orders executed.
 ```
 
 ```bash
 # 3. Dashboard launches
-streamlit run app_dashboard.py
+uv run streamlit run app_dashboard.py
 # Opens http://localhost:8501
 # Metrics will read zero until the log writer exists — that is expected.
 # Confirm all three pages load and the Parameters page saves without error.
@@ -204,6 +237,12 @@ or results that collapse when you shift the date range by a few months. A
 backtest that looks perfect is usually measuring your parameter tuning, not
 the strategy.
 
+Count every parameter set you try, including the ones you discard. A plain
+Sharpe from the best of N variants is inflated by N (informe §2.4). The
+`backtest/` module of Phase 0.7 records N and reports Deflated Sharpe and PBO
+instead of Sharpe; until it exists, treat any Lumibot backtest as a smoke test
+of the logic, not as evidence of an edge.
+
 ---
 
 ## 6. Phase 2 — Paper trading (minimum 60 days)
@@ -215,24 +254,24 @@ observe a full Wheel rotation including assignment.
 ### Launch
 
 ```bash
-source .venv/bin/activate
-python wheel_strategy.py
+uv run python wheel_strategy.py
 ```
 
 To keep it running after closing the terminal:
 
 ```bash
 # Simple approach
-nohup python wheel_strategy.py > logs/engine.log 2>&1 &
+nohup uv run python wheel_strategy.py > logs/engine.log 2>&1 &
 
 # Better for long-running deployments: a systemd service (Linux)
-# or a process manager such as supervisor / pm2.
+# or a process manager such as supervisor / pm2. Phase 1 moves this to
+# Docker Compose on the homelab.
 ```
 
 Run the dashboard in a second terminal:
 
 ```bash
-streamlit run app_dashboard.py
+uv run streamlit run app_dashboard.py
 ```
 
 ### Daily routine (5 minutes)
@@ -256,12 +295,15 @@ streamlit run app_dashboard.py
   selling covered calls on the resulting shares?
 - **Alpaca's pre-expiration liquidation.** If an ITM option approaches expiry
   without sufficient buying power, Alpaca liquidates roughly an hour before
-  the session closes. Your cash-secured check should prevent this — confirm
-  it does.
+  the session closes. The cash-secured check is per order, not aggregate, so
+  with several whitelisted symbols it may not prevent this. Watch for it.
 - **Contract selection.** Are the strikes and deltas the bot picks what you
   would have picked manually? This is where the delta placeholder shows up.
 - **Guard behavior.** Did the daily loss limit ever trigger? Did the kill
-  switch stop everything when you tested it? (Test it deliberately.)
+  switch stop everything when you tested it? (Test it deliberately.) The
+  daily loss limit is blind on any day the engine started after the open.
+- **Restarts.** After every restart, check whether open short options still
+  get their 80% early close. They don't today (premiums are in memory).
 
 ---
 
@@ -269,10 +311,18 @@ streamlit run app_dashboard.py
 
 Every item must be true. If any is false, stay in paper.
 
+This list is the Wheel-specific minimum. The gate that governs is the Phase 4
+table in [docs/INFORME_TALOS.md](docs/INFORME_TALOS.md) §10 (zero unexplained
+reconciliation mismatches, zero restarts with lost state, a timed restore
+game-day, fixed cost under 4% a year of capital, and the rest); every row must
+be green as well. That gate is operational, not statistical: 60–90 days cannot
+prove an edge exists, only that the system does not break.
+
 - [ ] 60+ consecutive days of paper operation completed
 - [ ] At least two full expiration cycles observed, including one assignment
 - [ ] The delta placeholder has been replaced with a real calculation
-- [ ] The log writer is implemented and the dashboard shows real metrics
+- [ ] Every gap in §0 is fixed and covered by a test in `tests/guards/`
+- [ ] The ledger is implemented and the dashboard shows real, net metrics
 - [ ] Every safety guard has been observed firing correctly at least once
       (cash-secured rejection, covered-call limit, daily loss limit, kill switch)
 - [ ] Zero unexplained crashes or unhandled exceptions in the last 30 days
@@ -281,8 +331,9 @@ Every item must be true. If any is false, stay in paper.
 - [ ] Max drawdown observed in paper is one you could tolerate in real money
 - [ ] Capital allocated is money you can lose entirely without consequence
 - [ ] Emergency fund funded and high-interest debt cleared first
-- [ ] You have consulted a tax professional about your local treatment of
-      options income and assignments
+- [ ] You have consulted a Puerto Rico tax professional about options income,
+      assignments, Act 60 / Act 38-2026 and §1256 (informe §3.4 and §13
+      points 2–3; the first may have a near deadline)
 
 ---
 
@@ -305,7 +356,9 @@ Answer the suitability questionnaire honestly; it determines the level granted.
 Transfer only the capital you decided on — and start below that. If your plan
 allows $20,000, begin with a fraction of it. The gap between a simulated
 drawdown and a real one is psychological, and it can only be measured by
-living through it.
+living through it. For the new crypto sleeves the staging is fixed in the
+informe's Phase 5: $500, then $2,000, then $10,000, each step with its own
+condition to move on.
 
 ### 8.3 Switch to live
 
@@ -327,8 +380,11 @@ living through it.
 
    ```bash
    # Stop the running process, then
-   python wheel_strategy.py
+   uv run python wheel_strategy.py
    ```
+
+   `live_trading_mode` is only read at startup. Until you restart, the engine
+   keeps using the endpoint it started with, whatever the dashboard shows.
 
 5. Watch the first trade end to end before walking away.
 
@@ -359,6 +415,11 @@ pkill -f wheel_strategy.py
 Note that the kill switch stops *new* orders; it does not close existing
 positions. Closing them is a manual decision.
 
+Today the kill switch is a single flag in `config.json`. The target design
+(CLAUDE.md §1.7) is fail-closed and triple redundant: a row in `risk_events`,
+a Redis key, or the file `/run/trading/HALT`, and an error while checking
+counts as halted.
+
 ### Adjusting parameters live
 
 Edit through the dashboard, never by hand-editing `config.json` while the
@@ -383,12 +444,14 @@ performance record and your only forensic trail when something goes wrong.
 
 | Symptom | Likely cause |
 |---|---|
-| `ModuleNotFoundError` | Virtual environment not activated, or `pip install -r requirements.txt` not run |
+| `ModuleNotFoundError` | Command run without `uv run`, or `uv sync` not run after pulling |
+| `RuntimeError: DATABASE_URL no está definida` | Alembic needs `DATABASE_URL` in the environment; it is never read from `alembic.ini` |
+| `RuntimeError: RISK FLOOR MUTADO EN RUNTIME` | Something patched a constant in `core/risk_floor.py` at runtime. Stop and find it; never work around it |
 | `KeyError: 'ALPACA_API_KEY'` | `.env` missing or not loaded; confirm the file exists and the variable name matches |
 | `ValidationError` on startup | `config.json` violates a model rule — the error names the offending field |
 | Engine runs but never trades | Check `active`, `emergency_kill_switch`, whether the daily loss limit fired, and whether cash covers the collateral for your whitelist |
 | "CSP rejected: cash < collateral" | Working as intended — your account cannot cover strike × 100 for that symbol |
-| Dashboard shows all zeros | The log writer is not implemented yet; `logs/equity.csv` does not exist |
+| Dashboard shows all zeros | Nothing writes `logs/equity.csv`; the ledger replaces it in Phase 0.1 |
 | Orders rejected by Alpaca | In live: options approval level insufficient, or insufficient buying power |
 | Engine died overnight | Check `logs/engine.log` for the traceback; consider a process manager with auto-restart |
 
@@ -400,10 +463,16 @@ performance record and your only forensic trail when something goes wrong.
   manual act — never automated.
 - Never commit `.env`. Never share API keys.
 - Coinbase keys: View + Trade only, never Transfer.
-- No leverage, no shorts, no naked options. These are structural properties of
-  the system, not preferences — do not add them.
-- Paper trade any code change before it touches live capital, including
-  changes that look trivial.
+- No naked options. Leverage and shorts only within `core/risk_floor.py`:
+  at most 1.5× and shorts only in BTC/ETH perps; alts are spot at 1×, so
+  long/flat. These are structural properties of the system, not preferences.
+  The floor is Python constants, never config; changing it takes a commit and a
+  review.
+- Anything an LLM does can only reduce risk (CLAUDE.md §1.2).
+- `tests/guards/` must pass on every change. If a change breaks one, the change
+  is wrong.
+- Backtest, then paper, then live, for any code change, including changes that
+  look trivial.
 - The kill switch must remain reachable by a human at all times.
 
 This software is a technical tool, not financial advice. Options selling

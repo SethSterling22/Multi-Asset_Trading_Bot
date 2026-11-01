@@ -1,0 +1,730 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Multi-Asset Trading Bot — mockup del dashboard</title>
+<style>
+:root{
+  color-scheme: dark;
+  --page:#0d0d0f; --surface-1:#111214; --surface-2:#16181b; --surface-3:#1c1f23;
+  --ink:#ffffff; --ink-2:#c3c2b7; --ink-3:#898781;
+  --grid:#22252a; --axis:#33373d; --hair:rgba(255,255,255,.09);
+  /* Categorical (dark steps, validado: todos los checks PASS sobre #111214) */
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181;
+  /* Status (fijo, nunca tematizado) */
+  --good:#0ca30c; --warning:#fab219; --serious:#ec835a; --critical:#d03b3b;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--page);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.45}
+a{color:var(--s1)}
+.wrap{max-width:1400px;margin:0 auto;padding:16px}
+
+/* ---- header ---- */
+header{display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+  background:var(--surface-1);border:1px solid var(--hair);border-radius:10px;padding:12px 16px}
+.brand{font-family:var(--mono);letter-spacing:.16em;font-size:13px;color:var(--ink);font-weight:600}
+.brand span{color:var(--ink-3);letter-spacing:.08em;font-weight:400}
+.pill{font-family:var(--mono);font-size:11px;letter-spacing:.08em;padding:4px 10px;border-radius:999px;
+  border:1px solid var(--hair);background:var(--surface-3);color:var(--ink-2)}
+.pill.on{border-color:rgba(12,163,12,.5);color:var(--good)}
+.pill.warn{border-color:rgba(250,178,25,.45);color:var(--warning)}
+.spacer{flex:1}
+button.halt{font-family:var(--mono);font-size:11px;letter-spacing:.08em;padding:6px 14px;border-radius:6px;
+  background:rgba(208,59,59,.12);border:1px solid rgba(208,59,59,.55);color:#ff8f8f;cursor:pointer}
+button.halt:hover{background:rgba(208,59,59,.2)}
+.clock{font-family:var(--mono);font-size:12px;color:var(--ink-3)}
+
+/* ---- KPI strip ---- */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:1px;
+  background:var(--hair);border:1px solid var(--hair);border-radius:10px;overflow:hidden;margin-top:12px}
+.kpi{background:var(--surface-1);padding:11px 14px}
+.kpi .lab{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3)}
+.kpi .val{font-size:20px;font-weight:600;margin-top:3px;letter-spacing:-.01em}
+.kpi .sub{font-size:11px;color:var(--ink-3);margin-top:1px;font-variant-numeric:tabular-nums}
+.up{color:var(--good)} .down{color:var(--critical)} .neu{color:var(--ink-2)}
+
+/* ---- tabs ---- */
+nav.tabs{display:flex;gap:2px;margin:16px 0 12px;border-bottom:1px solid var(--hair)}
+nav.tabs button{background:none;border:0;border-bottom:2px solid transparent;color:var(--ink-3);
+  font-family:var(--mono);font-size:11.5px;letter-spacing:.09em;padding:9px 14px;cursor:pointer}
+nav.tabs button[aria-selected=true]{color:var(--ink);border-bottom-color:var(--s1)}
+nav.tabs button:hover{color:var(--ink-2)}
+section[hidden]{display:none}
+
+/* ---- cards ---- */
+.card{background:var(--surface-1);border:1px solid var(--hair);border-radius:10px;padding:16px;margin-bottom:14px}
+.card h2{font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);margin:0 0 2px;font-weight:600}
+.card .hint{font-size:12px;color:var(--ink-3);margin:0 0 14px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:1000px){.grid2{grid-template-columns:1fr}}
+
+/* ---- legend ---- */
+.legend{display:flex;flex-wrap:wrap;gap:6px 18px;margin:0 0 10px;padding:0;list-style:none}
+.legend li{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--ink-2)}
+.legend i{width:11px;height:11px;border-radius:3px;display:block;flex:none}
+.legend .k{width:14px;height:2px;border-radius:2px}
+
+/* ---- table ---- */
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:right;font-weight:600;color:var(--ink-3);font-size:10.5px;letter-spacing:.07em;
+  text-transform:uppercase;padding:0 10px 8px;border-bottom:1px solid var(--hair);white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+td{padding:9px 10px;border-bottom:1px solid rgba(255,255,255,.05);text-align:right;
+  font-variant-numeric:tabular-nums;color:var(--ink-2)}
+tbody tr:hover td{background:var(--surface-2)}
+tfoot td{font-weight:600;color:var(--ink);border-top:1px solid var(--axis);border-bottom:0}
+.sname{display:flex;align-items:center;gap:8px;color:var(--ink);font-weight:500}
+.sname i{width:10px;height:10px;border-radius:3px;flex:none}
+.tag{font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;padding:2px 6px;border-radius:4px;
+  border:1px solid var(--hair);color:var(--ink-3);text-transform:uppercase}
+
+/* ---- hypothesis cards ---- */
+.hyp{border:1px solid var(--hair);border-radius:9px;background:var(--surface-2);padding:14px;margin-bottom:12px}
+.hyp .top{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:9px}
+.cls{font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;padding:3px 8px;border-radius:4px;font-weight:600}
+.cls.defect{background:rgba(236,131,90,.15);color:var(--serious);border:1px solid rgba(236,131,90,.4)}
+.cls.risk{background:rgba(250,178,25,.13);color:var(--warning);border:1px solid rgba(250,178,25,.35)}
+.cls.edge{background:rgba(57,135,229,.14);color:var(--s1);border:1px solid rgba(57,135,229,.4)}
+.st{font-family:var(--mono);font-size:9.5px;letter-spacing:.08em;color:var(--ink-3)}
+.hid{font-family:var(--mono);font-size:11px;color:var(--ink-3)}
+.hyp .claim{font-size:13px;color:var(--ink);margin:0 0 8px}
+.hyp .pred{font-size:12px;color:var(--ink-2);background:var(--surface-1);border-left:2px solid var(--axis);
+  padding:8px 11px;border-radius:0 5px 5px 0;margin:0 0 11px;font-family:var(--mono)}
+.rows{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:9px 20px;font-size:11.5px}
+.rows div{display:flex;justify-content:space-between;gap:10px;border-bottom:1px dotted rgba(255,255,255,.08);padding-bottom:3px}
+.rows span:first-child{color:var(--ink-3)}
+.rows span:last-child{color:var(--ink-2);font-variant-numeric:tabular-nums;font-family:var(--mono)}
+.gate{margin-top:11px;padding:9px 11px;border-radius:6px;font-size:12px;font-family:var(--mono)}
+.gate.can{background:rgba(12,163,12,.1);border:1px solid rgba(12,163,12,.35);color:#7ede7e}
+.gate.cant{background:rgba(255,255,255,.03);border:1px solid var(--hair);color:var(--ink-3)}
+.strike{text-decoration:line-through;color:var(--ink-3)}
+.note{font-size:11px;color:var(--ink-3);margin-top:8px;font-style:italic}
+.bar-track{height:5px;border-radius:3px;background:var(--surface-3);overflow:hidden;margin-top:5px}
+.bar-fill{height:100%;border-radius:0 3px 3px 0}
+
+/* ---- tooltip ---- */
+.tip{position:fixed;pointer-events:none;opacity:0;transition:opacity .08s;z-index:50;
+  background:#1c1f23;border:1px solid var(--axis);border-radius:7px;padding:9px 11px;font-size:12px;
+  box-shadow:0 8px 24px rgba(0,0,0,.55);min-width:150px}
+.tip .t{font-family:var(--mono);font-size:10.5px;color:var(--ink-3);margin-bottom:6px;letter-spacing:.05em}
+.tip .r{display:flex;align-items:center;gap:8px;justify-content:space-between;margin-top:3px}
+.tip .r i{width:9px;height:9px;border-radius:2px;flex:none}
+.tip .r b{font-variant-numeric:tabular-nums;font-weight:600;color:var(--ink)}
+.tip .r span{color:var(--ink-2);flex:1}
+
+svg{display:block;overflow:visible}
+.ax{font-size:10.5px;fill:var(--ink-3);font-variant-numeric:tabular-nums}
+.gl{stroke:var(--grid);stroke-width:1}
+.bl{stroke:var(--axis);stroke-width:1}
+.dlab{font-size:11px;fill:var(--ink-2);font-variant-numeric:tabular-nums}
+.dlab.em{fill:var(--ink);font-weight:600}
+footer{color:var(--ink-3);font-size:11.5px;padding:8px 4px 28px;line-height:1.6}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="brand">MULTI&#8209;ASSET&nbsp;BOT <span>· mockup · datos sintéticos</span></div>
+  <span class="pill on">PAPER</span>
+  <span class="pill">5 sleeves activos</span>
+  <span class="pill warn">día 47 / 60 del gate</span>
+  <div class="spacer"></div>
+  <span class="clock" id="clk">—</span>
+  <button class="halt">■ KILL SWITCH</button>
+</header>
+
+<div class="kpis" id="kpis"></div>
+
+<nav class="tabs" role="tablist">
+  <button role="tab" aria-selected="true"  data-t="live">LIVE</button>
+  <button role="tab" aria-selected="false" data-t="pnl">P&amp;L POR ESTRATEGIA</button>
+  <button role="tab" aria-selected="false" data-t="learn">APRENDIZAJE</button>
+  <button role="tab" aria-selected="false" data-t="health">SALUD</button>
+</nav>
+
+<!-- ======================= LIVE ======================= -->
+<section id="live">
+  <div class="card">
+    <h2>Equity total</h2>
+    <p class="hint">Neta de comisiones, financiación, slippage y coste de IA. Últimos 90 días · paper.
+      La línea gris es buy&amp;hold BTC normalizado al mismo capital inicial — el benchmark que hay que superar.</p>
+    <ul class="legend">
+      <li><i class="k" style="background:var(--s1)"></i>Bot (neto)</li>
+      <li><i class="k" style="background:var(--ink-3)"></i>BTC buy&amp;hold</li>
+    </ul>
+    <div id="c-equity"></div>
+  </div>
+
+  <div class="grid2">
+    <div class="card">
+      <h2>Operaciones cerradas hoy</h2>
+      <p class="hint">Cada fila lleva su sleeve y su motivo de cierre. El motivo es lo que hace diagnóstico el registro.</p>
+      <table id="t-ops"><thead><tr>
+        <th>Hora</th><th>Símbolo</th><th>Sleeve</th><th>Motivo</th><th>R</th><th>P&amp;L neto</th>
+      </tr></thead><tbody></tbody></table>
+    </div>
+    <div class="card">
+      <h2>Presupuesto de coste</h2>
+      <p class="hint">Límite duro: 0.5% anual del capital asignado (<code>MAX_FIXED_COST_PCT_YEAR</code>).
+        A $25,000 son <b>$10.42/mes</b>. Degradación automática al 80%, corte al 95%.</p>
+      <div id="c-budget"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= P&L ======================= -->
+<section id="pnl" hidden>
+  <div class="card">
+    <h2>P&amp;L neto por estrategia · últimos 90 días</h2>
+    <p class="hint">Toda cifra es neta, o no se muestra. <b>DSR</b> = Deflated Sharpe Ratio;
+      <b>N</b> = configuraciones evaluadas, incluidas las descartadas. Sin N registrado, el Sharpe no se imprime.</p>
+    <table id="t-pnl"><thead><tr>
+      <th>Sleeve</th><th>Asignado</th><th>Bruto</th><th>Fees</th><th>Funding</th><th>Slippage</th>
+      <th>Coste IA</th><th>Neto</th><th>% 90 d</th><th>DSR</th><th>PBO</th><th>N</th><th>Ops</th><th>vs BTC</th>
+    </tr></thead><tbody></tbody><tfoot></tfoot></table>
+  </div>
+
+  <div class="grid2">
+    <div class="card">
+      <h2>Contribución acumulada por sleeve</h2>
+      <p class="hint">Áreas apiladas de P&amp;L neto acumulado. Separación de 2px en color de superficie entre segmentos.</p>
+      <ul class="legend" id="lg-stack"></ul>
+      <div id="c-stack"></div>
+    </div>
+    <div class="card">
+      <h2>De bruto a neto</h2>
+      <p class="hint">El gráfico más útil del dashboard: dónde se va el edge. Si la barra de "neto" es una fracción
+        pequeña de "bruto", los costes se están comiendo la estrategia.</p>
+      <div id="c-fall"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Retorno neto sobre capital asignado</h2>
+    <p class="hint">Ventana de 90 días. La línea de trazos marca el benchmark: BTC buy&hold +6.20%. Barras topadas a 24px, extremo redondeado 4px, base cuadrada.</p>
+    <div id="c-ret"></div>
+  </div>
+</section>
+
+<!-- ======================= APRENDIZAJE ======================= -->
+<section id="learn" hidden>
+  <div class="grid2">
+    <div class="card">
+      <h2>Lo que va aprendiendo — 31 sin resolver</h2>
+      <p class="hint">Pre-registradas, con scope congelado. La muestra de descubrimiento <b>no</b> cuenta como evidencia.</p>
+      <div id="hyp-open"></div>
+    </div>
+    <div class="card">
+      <h2>Lo que ha aprendido — 4 en vigor</h2>
+      <p class="hint">Cruzaron el umbral de Ville, pasaron e-BH y tienen evidencia out-of-sample.
+        Efecto acotado y monótono hacia menos riesgo. TTL 90 días, sin excepciones.</p>
+      <div id="hyp-conf"></div>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Contabilidad de multiplicidad</h2>
+    <p class="hint">Un bot que propone 30 hipótesis/semana genera ~1,500/año. Al 5% sin corrección serían
+      <b>75 falsos positivos confirmados al año</b> entrando en cada decisión. e-BH bajo dependencia arbitraria lo impide.</p>
+    <div class="rows" style="max-width:760px">
+      <div><span>Hipótesis propuestas (acum.)</span><span>412</span></div>
+      <div><span>Vivas ahora</span><span>47</span></div>
+      <div><span>Confirmadas en vigor</span><span>4</span></div>
+      <div><span>Refutadas</span><span>209</span></div>
+      <div><span>Expiradas por TTL</span><span>148</span></div>
+      <div><span>Degradadas por drift</span><span>4</span></div>
+      <div><span>FDR objetivo (q)</span><span>0.05</span></div>
+      <div><span>Umbral de Ville (1/α)</span><span>100</span></div>
+      <div><span>Presupuesto α consumido</span><span>0.031 / 0.050</span></div>
+      <div><span>N registrado (search_log)</span><span>2,914</span></div>
+      <div><span>Sharpe espurio esperado a N=2,914</span><span>2.42</span></div>
+      <div><span>Umbral t exigido (Harvey-Liu-Zhu)</span><span>3.00</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= SALUD ======================= -->
+<section id="health" hidden>
+  <div class="card">
+    <h2>Salud de feeds y ejecución</h2>
+    <p class="hint"><code>ws_last_message_age_seconds</code> es la métrica más importante del sistema:
+      un socket TCP vivo que no entrega datos es el fallo más peligroso que existe.</p>
+    <table id="t-health"><thead><tr>
+      <th>Componente</th><th>Estado</th><th>Edad últ. msg</th><th>Reconexiones 24h</th>
+      <th>Huecos 24h</th><th>Rate limit</th><th>Latencia orden p95</th>
+    </tr></thead><tbody></tbody></table>
+  </div>
+  <div class="grid2">
+    <div class="card">
+      <h2>Riesgo en vivo</h2>
+      <div class="rows">
+        <div><span>Apalancamiento bruto</span><span>1.18×</span></div>
+        <div><span>Tope (BTC/ETH · alts)</span><span>1.5× · 1.0×</span></div>
+        <div><span>Posiciones abiertas</span><span>6 / 8</span></div>
+        <div><span>Peor distancia a liquidación</span><span>14.2σ diarias</span></div>
+        <div><span>Mínimo exigido</span><span>8.0σ</span></div>
+        <div><span>Correlación media de la cesta</span><span>0.81</span></div>
+        <div><span>Apuestas independientes (N_ef)</span><span>1.26 de 6</span></div>
+        <div><span>Uso del límite diario</span><span>28%</span></div>
+        <div><span>Pérdidas consecutivas</span><span>3 / 8</span></div>
+        <div><span>Circuit breakers abiertos</span><span>0</span></div>
+        <div><span>Mismatches de reconciliación</span><span>0</span></div>
+        <div><span>Offset de reloj (chrony)</span><span>3.1 ms</span></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Infraestructura</h2>
+      <div class="rows">
+        <div><span>UPS</span><span>red · 100%</span></div>
+        <div><span>Consumo del host</span><span>74 W</span></div>
+        <div><span>Coste eléctrico estimado</span><span>$13.5/mes</span></div>
+        <div><span>Timescale · en disco</span><span>11.4 GB</span></div>
+        <div><span>Ratio de compresión</span><span>12.8×</span></div>
+        <div><span>Lag del bus (Redis Streams)</span><span>0 msg</span></div>
+        <div><span>Último WAL archivado</span><span>hace 9 s</span></div>
+        <div><span>Último backup restic</span><span>hace 4 h</span></div>
+        <div><span>Último game-day de restore</span><span>hace 12 d · RTO 2h41</span></div>
+        <div><span>Dead-man's switch externo</span><span>ok · ping hace 41 s</span></div>
+        <div><span>Stops reduce-only en exchange</span><span>6 / 6 posiciones</span></div>
+        <div><span>Hash del risk floor</span><span>a3f10c9e…</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  Mockup de referencia visual. Datos sintéticos generados en el navegador — no son resultados reales.
+  Paleta categórica validada con <code>validate_palette.js</code> sobre la superficie <code>#111214</code>:
+  los cinco slots pasan banda de luminosidad, suelo de croma, separación CVD (ΔE 8.4 peor par adyacente),
+  suelo de visión normal (19.3) y contraste ≥3:1.
+</footer>
+</div>
+
+<div class="tip" id="tip"></div>
+
+<script>
+// ============================================================ datos sintéticos
+const SL = [
+  {id:'funding_carry',   name:'Funding carry',     c:'var(--s3)', hex:'#199e70', alloc:10000, gross:250, fees:33, fund:+15, slip:2,   ai:3.5,  ops:31,  dsr:0.71, pbo:0.28, N:412,  tag:'delta-neutral', vol:0.35},
+  {id:'xsec_momentum',   name:'Momentum X-sec',    c:'var(--s1)', hex:'#3987e5', alloc:10000, gross:400, fees:97, fund:-13, slip:13,  ai:5.5,  ops:214, dsr:0.44, pbo:0.41, N:1860, tag:'semanal',       vol:1.35},
+  {id:'trend',           name:'Trend BTC/ETH',     c:'var(--s2)', hex:'#d95926', alloc:5000,  gross:150, fees:24, fund:-6,  slip:3.5, ai:2.75, ops:47,  dsr:0.33, pbo:0.46, N:540,  tag:'días-semanas',  vol:1.6},
+  {id:'wheel',           name:'Wheel (equities)',  c:'var(--s4)', hex:'#c98500', alloc:12000, gross:355, fees:46, fund:0,   slip:8,   ai:1.5,  ops:64,  dsr:0.58, pbo:0.34, N:96,   tag:'venta de prima',vol:0.8},
+  {id:'crypto_rebalance',name:'Rebalanceo spot',   c:'var(--s5)', hex:'#d55181', alloc:8000,  gross:128, fees:22, fund:0,   slip:5,   ai:0.75, ops:28,  dsr:0.29, pbo:0.49, N:6,    tag:'long/flat',     vol:0.55}
+];
+SL.forEach(s=>{ s.net = s.gross - s.fees + s.fund - s.slip - s.ai; s.pct = s.net/s.alloc*100; });
+const CAP = SL.reduce((a,s)=>a+s.alloc,0);
+const BTC_90D_PCT = 6.20;      // benchmark en la misma ventana
+
+let _s=20260913;
+const rnd=()=>{_s=(_s*1103515245+12345)&0x7fffffff;return _s/0x7fffffff};
+const N=90;
+const days=[...Array(N)].map((_,i)=>{const d=new Date(2026,5,15);d.setDate(d.getDate()+i);return d});
+
+// Contribución diaria por sleeve: deriva dominante + ruido proporcional a su vol,
+// reescalada para terminar exactamente en el neto de 90 días de la tabla.
+const series={};
+// Factor de mercado común (autocorrelado): sin él, sumar 5 sleeves independientes
+// cancela el ruido y el total sube en línea recta — irreal y engañoso.
+const shock=[]; let z=0;
+for(let i=0;i<N;i++){ z = 0.82*z + (rnd()-0.5)*2.0; shock.push(z); }
+SL.forEach(s=>{
+  const mu=s.net/N, inc=[];
+  for(let i=0;i<N;i++) inc.push(mu*(1 + s.vol*(2.6*shock[i] + 1.8*(rnd()-0.5))));
+  const k=s.net/inc.reduce((a,v)=>a+v,0);
+  let c=0; series[s.id]=inc.map(v=>{c+=v*k;return c});
+});
+const total=[...Array(N)].map((_,i)=>SL.reduce((a,s)=>a+series[s.id][i],0));
+// drawdown real de la serie sintética, para que el KPI sea coherente
+let peak=0,mdd=0;
+total.forEach(v=>{peak=Math.max(peak,v);mdd=Math.min(mdd,(v-peak)/(CAP+peak))});
+// BTC buy&hold normalizado a la misma base
+let bi=[]; for(let i=0;i<N;i++) bi.push(1+2.4*(rnd()-0.5)*3.0);
+const bk=(CAP*BTC_90D_PCT/100)/bi.reduce((a,v)=>a+v,0);
+let bc=0; const btcN=bi.map(v=>{bc+=v*bk;return bc});
+
+const fmt=(v,d=0)=>(v<0?'−':'')+'$'+Math.abs(v).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
+const pct=v=>(v>=0?'+':'−')+Math.abs(v).toFixed(2)+'%';
+const cls=v=>v>=0?'up':'down';
+
+// ============================================================ KPIs
+const netTot=SL.reduce((a,s)=>a+s.net,0);
+document.getElementById('kpis').innerHTML=[
+  ['Capital',fmt(CAP+netTot,2),'asignado '+fmt(CAP),''],
+  ['P&L 90 días',fmt(netTot,2),'neto de todo',cls(netTot)],
+  ['Retorno',pct(netTot/CAP*100),'sobre capital',cls(netTot)],
+  ['BTC buy&hold',pct(BTC_90D_PCT),'misma ventana','neu'],
+  ['vs benchmark',pct((netTot-btcN[N-1])/CAP*100),'lo honesto',cls(netTot-btcN[N-1])],
+  ['Drawdown máx',(mdd*100).toFixed(2)+'%','peor del backtest −4.1%','neu'],
+  ['Operaciones','384','de las cuales 214 xsec',''],
+  ['Coste IA / mes','$8.40','de $10.42 · 81%','neu'],
+  ['Coste por operación','$0.066','fees+slip+IA',''],
+  ['Calibración LLM','0.61','declarada 0.85','neu']
+].map(([l,v,s,c])=>`<div class="kpi"><div class="lab">${l}</div><div class="val ${c||''}">${v}</div><div class="sub">${s}</div></div>`).join('');
+
+const tip=document.getElementById('tip');
+const showTip=(e,html)=>{tip.innerHTML=html;tip.style.opacity=1;
+  const r=tip.getBoundingClientRect();
+  tip.style.left=Math.min(e.clientX+14,innerWidth-r.width-10)+'px';
+  tip.style.top=Math.max(10,e.clientY-r.height-12)+'px';};
+const hideTip=()=>tip.style.opacity=0;
+const SVG='http://www.w3.org/2000/svg';
+const el=(n,a={})=>{const x=document.createElementNS(SVG,n);for(const k in a)x.setAttribute(k,a[k]);return x};
+const dfmt=d=>d.toLocaleDateString('es',{day:'2-digit',month:'short'});
+// Ticks redondeados a números limpios (1/2/2.5/5 × 10^n)
+function niceTicks(max,count){
+  const raw=max/count, mag=Math.pow(10,Math.floor(Math.log10(raw))), n=raw/mag;
+  const step=(n<=1?1:n<=2?2:n<=2.5?2.5:n<=5?5:10)*mag;
+  const out=[]; for(let v=0; v<=max*1.0001+step*0.5; v+=step) out.push(+v.toFixed(10));
+  return out;
+}
+
+// ============================================================ línea: equity
+function lineChart(host,w,h,series2){
+  const M={t:14,r:74,b:26,l:58};
+  const all=series2.flatMap(s=>s.data);
+  let lo=Math.min(0,...all), hi=Math.max(...all); const pad=(hi-lo)*0.12||1; lo-=pad; hi+=pad;
+  const X=i=>M.l+i*(w-M.l-M.r)/(N-1), Y=v=>M.t+(hi-v)/(hi-lo)*(h-M.t-M.b);
+  const svg=el('svg',{viewBox:`0 0 ${w} ${h}`,width:'100%',height:h});
+  const stepL=(()=>{const r=(hi-lo)/5,m=Math.pow(10,Math.floor(Math.log10(r))),n=r/m;
+    return (n<=1?1:n<=2?2:n<=2.5?2.5:n<=5?5:10)*m})();
+  const tv=[]; for(let v=Math.ceil(lo/stepL)*stepL; v<=hi; v+=stepL) tv.push(v);
+  for(const v of tv){const y=Y(v);
+    svg.appendChild(el('line',{x1:M.l,x2:w-M.r,y1:y,y2:y,class:v===0?'bl':'gl'}));
+    const t=el('text',{x:M.l-9,y:y+3.5,class:'ax','text-anchor':'end'});t.textContent=fmt(v);svg.appendChild(t);}
+  [0,22,44,66,89].forEach(i=>{const t=el('text',{x:X(i),y:h-8,class:'ax','text-anchor':'middle'});
+    t.textContent=dfmt(days[i]);svg.appendChild(t)});
+  // área del principal
+  const s0=series2[0];
+  let a=`M ${X(0)} ${Y(0)}`; s0.data.forEach((v,i)=>a+=` L ${X(i)} ${Y(v)}`); a+=` L ${X(N-1)} ${Y(0)} Z`;
+  svg.appendChild(el('path',{d:a,fill:s0.hex,'fill-opacity':.10,stroke:'none'}));
+  series2.forEach(s=>{
+    let d=''; s.data.forEach((v,i)=>d+=(i?' L ':'M ')+X(i)+' '+Y(v));
+    svg.appendChild(el('path',{d,fill:'none',stroke:s.hex,'stroke-width':s.dash?1.75:2,
+      'stroke-linejoin':'round','stroke-linecap':'round','stroke-dasharray':s.dash||''}));
+    const lv=s.data[N-1];
+    svg.appendChild(el('circle',{cx:X(N-1),cy:Y(lv),r:4.5,fill:s.hex,stroke:'#111214','stroke-width':2}));
+    const t=el('text',{x:X(N-1)+10,y:Y(lv)+4,class:'dlab'+(s.dash?'':' em')});
+    t.textContent=fmt(lv); svg.appendChild(t);
+  });
+  const cross=el('line',{x1:0,x2:0,y1:M.t,y2:h-M.b,stroke:'#4a4f56','stroke-width':1,opacity:0});
+  svg.appendChild(cross);
+  const dots=series2.map(s=>{const c=el('circle',{r:5,fill:s.hex,stroke:'#111214','stroke-width':2,opacity:0});svg.appendChild(c);return c});
+  const hit=el('rect',{x:M.l,y:M.t,width:w-M.l-M.r,height:h-M.t-M.b,fill:'transparent'});
+  svg.appendChild(hit);
+  hit.addEventListener('mousemove',e=>{
+    const bb=svg.getBoundingClientRect(), px=(e.clientX-bb.left)/bb.width*w;
+    const i=Math.max(0,Math.min(N-1,Math.round((px-M.l)/((w-M.l-M.r)/(N-1)))));
+    cross.setAttribute('x1',X(i));cross.setAttribute('x2',X(i));cross.setAttribute('opacity',1);
+    series2.forEach((s,k)=>{dots[k].setAttribute('cx',X(i));dots[k].setAttribute('cy',Y(s.data[i]));dots[k].setAttribute('opacity',1)});
+    showTip(e,`<div class="t">${days[i].toLocaleDateString('es',{day:'2-digit',month:'long'})}</div>`+
+      series2.map(s=>`<div class="r"><i style="background:${s.hex}"></i><span>${s.name}</span><b>${fmt(s.data[i],2)}</b></div>`).join(''));
+  });
+  hit.addEventListener('mouseleave',()=>{hideTip();cross.setAttribute('opacity',0);dots.forEach(d=>d.setAttribute('opacity',0))});
+  host.innerHTML=''; host.appendChild(svg);
+}
+lineChart(document.getElementById('c-equity'),1000,268,[
+  {name:'Bot (neto)',hex:'#3987e5',data:total},
+  {name:'BTC buy&hold',hex:'#898781',data:btcN,dash:'5 4'}
+]);
+
+// ============================================================ presupuesto (stat + medidor)
+(()=>{
+  const items=[['API Anthropic (event-gated)',6.10],['Modelo local (electricidad)',1.35],['Datos (stack gratis)',0.00],['Hosting externo del dead-man',0.95]];
+  const tot=items.reduce((a,x)=>a+x[1],0), lim=10.42;
+  document.getElementById('c-budget').innerHTML =
+    `<div style="font-size:32px;font-weight:600;letter-spacing:-.02em">$${tot.toFixed(2)}
+       <span style="font-size:14px;color:var(--ink-3);font-weight:400">/ $${lim.toFixed(2)} mes</span></div>
+     <div class="bar-track" style="height:8px;margin:10px 0 4px">
+       <div class="bar-fill" style="width:${tot/lim*100}%;background:var(--warning)"></div></div>
+     <div style="font-size:11px;color:var(--ink-3);margin-bottom:14px">
+       ⚠ 81% del presupuesto · degradación automática al 80% (menos contexto, modelo más pequeño)</div>
+     <table><tbody>${items.map(([k,v])=>
+       `<tr><td style="color:var(--ink-2)">${k}</td><td>$${v.toFixed(2)}</td></tr>`).join('')}
+       </tbody><tfoot><tr><td>Total</td><td>$${tot.toFixed(2)}</td></tr></tfoot></table>`;
+})();
+
+// ============================================================ tabla ops del día
+(()=>{
+  const rows=[
+    ['14:22','ETH-PERP','funding_carry','funding capturado', 0.42,  38.10],
+    ['13:05','SOL-USD', 'xsec_momentum','rebalanceo semanal',-0.61, -24.80],
+    ['11:47','BTC-PERP','trend',         'stop reduce-only', -1.00, -51.20],
+    ['10:30','AAPL 240p','wheel',        '80% de prima',      0.80,  64.00],
+    ['09:58','LINK-USD','xsec_momentum', 'rebalanceo semanal', 1.35,  54.90],
+    ['08:14','BTC-USD', 'crypto_rebalance','umbral ±5%',       0.22,  11.40]
+  ];
+  document.querySelector('#t-ops tbody').innerHTML=rows.map(r=>{
+    const s=SL.find(x=>x.id===r[2]);
+    return `<tr><td style="font-family:var(--mono);color:var(--ink-3)">${r[0]}</td>
+      <td style="color:var(--ink)">${r[1]}</td>
+      <td><span class="sname"><i style="background:${s.hex}"></i>${s.name}</span></td>
+      <td style="text-align:left;color:var(--ink-3);font-size:11.5px">${r[3]}</td>
+      <td class="${cls(r[4])}">${r[4]>=0?'+':'−'}${Math.abs(r[4]).toFixed(2)}R</td>
+      <td class="${cls(r[5])}">${fmt(r[5],2)}</td></tr>`}).join('');
+})();
+
+// ============================================================ tabla P&L
+(()=>{
+  const tb=document.querySelector('#t-pnl tbody');
+  tb.innerHTML=SL.map(s=>`<tr>
+    <td><span class="sname"><i style="background:${s.hex}"></i>${s.name} <span class="tag">${s.tag}</span></span></td>
+    <td>${fmt(s.alloc)}</td><td>${fmt(s.gross)}</td>
+    <td class="down">−${fmt(s.fees).slice(1)}</td>
+    <td class="${s.fund>=0?'up':'down'}">${s.fund===0?'—':fmt(s.fund)}</td>
+    <td class="down">−${fmt(s.slip).slice(1)}</td>
+    <td class="down">−$${s.ai.toFixed(2)}</td>
+    <td class="${cls(s.net)}" style="color:${s.net>=0?'var(--good)':'var(--critical)'};font-weight:600">${fmt(s.net)}</td>
+    <td class="${cls(s.pct)}">${pct(s.pct)}</td>
+    <td>${s.dsr.toFixed(2)}</td>
+    <td style="color:${s.pbo>0.5?'var(--critical)':'var(--ink-2)'}">${s.pbo.toFixed(2)}</td>
+    <td>${s.N.toLocaleString()}</td><td>${s.ops}</td>
+    <td class="${cls(s.pct-BTC_90D_PCT)}">${pct(s.pct-BTC_90D_PCT)}</td></tr>`).join('');
+  const T=k=>SL.reduce((a,s)=>a+s[k],0);
+  document.querySelector('#t-pnl tfoot').innerHTML=`<tr>
+    <td>Total · 5 sleeves</td><td>${fmt(CAP)}</td><td>${fmt(T('gross'))}</td>
+    <td>−${fmt(T('fees')).slice(1)}</td><td>${fmt(T('fund'))}</td>
+    <td>−${fmt(T('slip')).slice(1)}</td><td>−${fmt(T('ai')).slice(1)}</td>
+    <td style="color:var(--good)">${fmt(T('net'))}</td>
+    <td class="${cls(T('net')/CAP*100)}">${pct(T('net')/CAP*100)}</td><td colspan="5" style="color:var(--ink-3);font-size:11px">
+    90 días · benchmark BTC +6.20% en la misma ventana</td></tr>`;
+})();
+
+// ============================================================ áreas apiladas
+(()=>{
+  document.getElementById('lg-stack').innerHTML=SL.map(s=>
+    `<li><i style="background:${s.hex}"></i>${s.name}</li>`).join('');
+  const w=640,h=270,M={t:14,r:84,b:26,l:58};
+  const stack=[]; let prev=new Array(N).fill(0);
+  SL.forEach(s=>{const top=prev.map((v,i)=>v+series[s.id][i]);stack.push({s,bot:prev,top});prev=top});
+  const flat=stack.flatMap(x=>x.top.concat(x.bot));
+  let lo=Math.min(0,...flat),hi=Math.max(...flat);const p=(hi-lo)*.12||1;lo-=p;hi+=p;
+  const X=i=>M.l+i*(w-M.l-M.r)/(N-1),Y=v=>M.t+(hi-v)/(hi-lo)*(h-M.t-M.b);
+  const svg=el('svg',{viewBox:`0 0 ${w} ${h}`,width:'100%',height:h});
+  const stepS=(()=>{const r=(hi-lo)/4,m=Math.pow(10,Math.floor(Math.log10(r))),n=r/m;
+    return (n<=1?1:n<=2?2:n<=2.5?2.5:n<=5?5:10)*m})();
+  for(let v=Math.ceil(lo/stepS)*stepS; v<=hi; v+=stepS){const y=Y(v);
+    svg.appendChild(el('line',{x1:M.l,x2:w-M.r,y1:y,y2:y,class:Math.abs(v)<1e-9?'bl':'gl'}));
+    const t=el('text',{x:M.l-9,y:y+3.5,class:'ax','text-anchor':'end'});t.textContent=fmt(v);svg.appendChild(t)}
+  [0,30,60,89].forEach(i=>{const t=el('text',{x:X(i),y:h-8,class:'ax','text-anchor':'middle'});t.textContent=dfmt(days[i]);svg.appendChild(t)});
+  // 2px de separación en color de superficie: se dibuja el borde inferior de cada banda con el surface
+  stack.forEach(({s,bot,top})=>{
+    let d='M '+X(0)+' '+Y(bot[0]);
+    top.forEach((v,i)=>d+=' L '+X(i)+' '+Y(v));
+    for(let i=N-1;i>=0;i--) d+=' L '+X(i)+' '+Y(bot[i]);
+    svg.appendChild(el('path',{d:d+' Z',fill:s.hex,'fill-opacity':.55,stroke:'#111214','stroke-width':2}));
+    const lv=top[N-1], bv=bot[N-1];
+    if(Math.abs(Y(bv)-Y(lv))>13){
+      const t=el('text',{x:w-M.r+8,y:(Y(lv)+Y(bv))/2+4,class:'dlab'});
+      t.textContent=fmt(series[s.id][N-1]); svg.appendChild(t);
+    }
+  });
+  const cross=el('line',{y1:M.t,y2:h-M.b,stroke:'#4a4f56','stroke-width':1,opacity:0});svg.appendChild(cross);
+  const hit=el('rect',{x:M.l,y:M.t,width:w-M.l-M.r,height:h-M.t-M.b,fill:'transparent'});svg.appendChild(hit);
+  hit.addEventListener('mousemove',e=>{
+    const bb=svg.getBoundingClientRect(),px=(e.clientX-bb.left)/bb.width*w;
+    const i=Math.max(0,Math.min(N-1,Math.round((px-M.l)/((w-M.l-M.r)/(N-1)))));
+    cross.setAttribute('x1',X(i));cross.setAttribute('x2',X(i));cross.setAttribute('opacity',1);
+    showTip(e,`<div class="t">${days[i].toLocaleDateString('es',{day:'2-digit',month:'long'})} · acumulado</div>`+
+      SL.map(s=>`<div class="r"><i style="background:${s.hex}"></i><span>${s.name}</span><b>${fmt(series[s.id][i],2)}</b></div>`).join('')+
+      `<div class="r" style="border-top:1px solid var(--axis);margin-top:6px;padding-top:5px"><span>Total</span><b>${fmt(total[i],2)}</b></div>`);
+  });
+  hit.addEventListener('mouseleave',()=>{hideTip();cross.setAttribute('opacity',0)});
+  document.getElementById('c-stack').appendChild(svg);
+})();
+
+// ============================================================ waterfall
+(()=>{
+  const T=k=>SL.reduce((a,s)=>a+s[k],0);
+  const steps=[
+    {l:'Bruto',      v:T('gross'), kind:'total'},
+    {l:'Fees',       v:-T('fees'), kind:'neg'},
+    {l:'Financiación',v:T('fund'),  kind:T('fund')>=0?'pos':'neg'},
+    {l:'Slippage',   v:-T('slip'), kind:'neg'},
+    {l:'Coste IA',   v:-T('ai'),   kind:'neg'},
+    {l:'Neto',       v:T('net'),   kind:'total'}
+  ];
+  const w=640,h=300,M={t:20,r:16,b:52,l:70};
+  let run=0; const bars=[];
+  steps.forEach((s,i)=>{
+    if(s.kind==='total'){bars.push({...s,from:0,to:s.v});run=s.v;}
+    else{bars.push({...s,from:run,to:run+s.v});run+=s.v;}
+  });
+  const rawHi=Math.max(...bars.flatMap(b=>[b.from,b.to]));
+  const wt=niceTicks(rawHi*1.06,4); const hi=wt[wt.length-1], lo=0;
+  const bw=Math.min(24,(w-M.l-M.r)/steps.length*0.5);
+  const cx=i=>M.l+(i+0.5)*(w-M.l-M.r)/steps.length;
+  const Y=v=>M.t+(hi-v)/(hi-lo)*(h-M.t-M.b);
+  const svg=el('svg',{viewBox:`0 0 ${w} ${h}`,width:'100%',height:h});
+  wt.forEach(v=>{const y=Y(v);
+    svg.appendChild(el('line',{x1:M.l,x2:w-M.r,y1:y,y2:y,class:'gl'}));
+    const t=el('text',{x:M.l-9,y:y+3.5,class:'ax','text-anchor':'end'});t.textContent=fmt(v);svg.appendChild(t)});
+  svg.appendChild(el('line',{x1:M.l,x2:w-M.r,y1:Y(0),y2:Y(0),class:'bl'}));
+  bars.forEach((b,i)=>{
+    const y0=Y(Math.max(b.from,b.to)),y1=Y(Math.min(b.from,b.to));
+    const col=b.kind==='total'?'#3987e5':b.kind==='neg'?'#d03b3b':'#0ca30c';
+    const hgt=Math.max(2,y1-y0);
+    // extremo de dato redondeado 4px, base cuadrada
+    const r=4, x=cx(i)-bw/2;
+    const d = b.kind==='total'
+      ? `M ${x} ${y1} L ${x} ${y0+r} Q ${x} ${y0} ${x+r} ${y0} L ${x+bw-r} ${y0} Q ${x+bw} ${y0} ${x+bw} ${y0+r} L ${x+bw} ${y1} Z`
+      : `M ${x} ${y0} h ${bw} v ${hgt} h ${-bw} Z`;
+    const p=el('path',{d,fill:col,'fill-opacity':b.kind==='total'?.9:.75});
+    svg.appendChild(p);
+    if(i<bars.length-1&&b.kind!=='total'||i===0){
+      svg.appendChild(el('line',{x1:cx(i)+bw/2,x2:cx(i+1)-bw/2,y1:Y(b.to),y2:Y(b.to),
+        stroke:'#4a4f56','stroke-width':1,'stroke-dasharray':'3 3'}));
+    }
+    const t=el('text',{x:cx(i),y:y0-8,class:'dlab'+(b.kind==='total'?' em':''),'text-anchor':'middle'});
+    t.textContent=(b.kind==='neg'?'−':b.kind==='pos'?'+':'')+fmt(Math.abs(b.v));svg.appendChild(t);
+    const lt=el('text',{x:cx(i),y:h-32,class:'ax','text-anchor':'middle'});lt.textContent=b.l;svg.appendChild(lt);
+    p.addEventListener('mousemove',e=>showTip(e,
+      `<div class="t">${b.l}</div><div class="r"><i style="background:${col}"></i><span>${b.kind==='total'?'nivel':'delta'}</span><b>${fmt(b.v,2)}</b></div>
+       <div class="r"><span>acumulado</span><b>${fmt(b.to,2)}</b></div>`));
+    p.addEventListener('mouseleave',hideTip);
+  });
+  const pctKept=T('net')/T('gross')*100;
+  const n=el('text',{x:M.l,y:h-10,class:'ax','text-anchor':'start'});
+  n.textContent=`Se conserva el ${pctKept.toFixed(1)}% del bruto. Los costes se llevan ${fmt(T('gross')-T('net'))}.`;
+  svg.appendChild(n);
+  document.getElementById('c-fall').appendChild(svg);
+})();
+
+// ============================================================ barras de retorno
+(()=>{
+  const w=1000,h=200,M={t:16,r:80,b:34,l:150};
+  const rt=niceTicks(Math.max(BTC_90D_PCT,...SL.map(s=>s.pct))*1.12,4); const hi=rt[rt.length-1];
+  const bh=Math.min(24,(h-M.t-M.b)/SL.length*0.55);
+  const cy=i=>M.t+(i+0.5)*(h-M.t-M.b)/SL.length;
+  const X=v=>M.l+v/hi*(w-M.l-M.r);
+  const svg=el('svg',{viewBox:`0 0 ${w} ${h}`,width:'100%',height:h});
+  rt.forEach((v,i)=>{const x=X(v);
+    svg.appendChild(el('line',{x1:x,x2:x,y1:M.t,y2:h-M.b,class:i?'gl':'bl'}));
+    const t=el('text',{x,y:h-16,class:'ax','text-anchor':'middle'});t.textContent=v.toFixed(1)+'%';svg.appendChild(t)});
+  SL.forEach((s,i)=>{
+    const y=cy(i)-bh/2, wd=Math.max(2,X(s.pct)-M.l), r=4;
+    const d=`M ${M.l} ${y} L ${M.l+wd-r} ${y} Q ${M.l+wd} ${y} ${M.l+wd} ${y+r} L ${M.l+wd} ${y+bh-r} Q ${M.l+wd} ${y+bh} ${M.l+wd-r} ${y+bh} L ${M.l} ${y+bh} Z`;
+    const p=el('path',{d,fill:s.hex,'fill-opacity':.8});svg.appendChild(p);
+    const lt=el('text',{x:M.l-12,y:cy(i)+4,class:'dlab','text-anchor':'end'});lt.textContent=s.name;svg.appendChild(lt);
+    const vt=el('text',{x:M.l+wd+10,y:cy(i)+4.5,class:'dlab em'});vt.textContent=s.pct.toFixed(2)+'%';svg.appendChild(vt);
+    p.addEventListener('mousemove',e=>showTip(e,`<div class="t">${s.name}</div>
+      <div class="r"><i style="background:${s.hex}"></i><span>neto / asignado</span><b>${s.pct.toFixed(2)}%</b></div>
+      <div class="r"><span>neto 90 d</span><b>${fmt(s.net)}</b></div>
+      <div class="r"><span>DSR · PBO</span><b>${s.dsr.toFixed(2)} · ${s.pbo.toFixed(2)}</b></div>
+      <div class="r"><span>N configs</span><b>${s.N.toLocaleString()}</b></div>`));
+    p.addEventListener('mouseleave',hideTip);
+  });
+  const bx=X(BTC_90D_PCT);
+  svg.appendChild(el('line',{x1:bx,x2:bx,y1:M.t-4,y2:h-M.b+2,stroke:'#898781','stroke-width':1.5,'stroke-dasharray':'5 4'}));
+  const bt=el('text',{x:bx+8,y:M.t+6,class:'ax'}); bt.textContent='BTC +6.20%'; svg.appendChild(bt);
+  document.getElementById('c-ret').appendChild(svg);
+})();
+
+// ============================================================ hipótesis
+const HYP=[
+ {open:true,cls:'defect',id:'H-7f3a',st:'ACUMULANDO · scope congelado 2026-08-19T23:59:59Z',
+  claim:'El componente <code>risk_override</code> cierra posiciones en &lt;60 s con MAE_r = MFE_r = 0 (el precio no se movió), realizando r ≈ −(coste round-trip) ≈ −0.18 R.',
+  pred:'P(hold_s&lt;60 ∧ mae_r=0 ∧ mfe_r=0 | close_reason=risk_override)<br>H0: p ≤ 0.021 (tasa base 180 d, n=4,217) · H1: p ≥ 0.80<br>Test: binomial exacto + martingala de apuestas (anytime-valid)',
+  rows:[['descubrimiento (NO cuenta)','5 casos · 1 clúster'],['out-of-sample','4 / 4 éxitos'],
+        ['n_observed · clústeres','4 · 4'],['n_effective','3.7'],
+        ['n_required','3 &nbsp;<span style="color:#5a5f66">ceil(ln α / ln p0)</span>'],
+        ['log₁₀ E_t','6.91 &nbsp;(umbral 3.00)'],['confidence seq. 99.9%','[0.47, 1.00]'],
+        ['posterior Beta(5,1)','media 0.833'],['e-BH','q 0.010 · rank 2/47 · PASA'],
+        ['min_effect_to_act','0.20']],
+  gate:['can','cs_lower 0.47 &gt; min_effect_to_act 0.20  →  CAN_ACT ✓'],
+  effect:'block_component{risk_override, mode: dry_run} + open_ticket(P1)',
+  note:'Es un bug, no un patrón de mercado. Su efecto legítimo es un ticket y un circuit-breaker — nunca "entra en cada decisión".',
+  conf:'declarada 0.85 → calibrada 0.61'},
+
+ {open:true,cls:'edge',id:'H-91c2',st:'ACUMULANDO · día 34 de la ventana OOS',
+  claim:'Cuando <code>funding_z_30d &gt; 2</code> y el open interest cae más de 8% en 4 h, el retorno a 24 h de la pata corta del carry es superior a la media incondicional.',
+  pred:'Métrica: r_multiple · H0: μ ≤ 0 · H1: d ≥ 0.10<br>Test: t sobre retornos + e-value por apuestas<br>MDE pre-registrado: d = 0.10 (Sharpe por operación)',
+  rows:[['n_observed · clústeres','63 · 41'],['n_effective','38.4'],
+        ['n_required','785 &nbsp;<span style="color:#5a5f66">n = 7.849/d², d=0.10</span>'],
+        ['le faltan','747 observaciones ≈ 14 meses'],
+        ['log₁₀ E_t','0.41 &nbsp;(umbral 2.00)'],['confidence seq. 99%','[−0.04, +0.19]'],
+        ['e-BH','no alcanza el corte'],['min_effect_to_act','0.08'],
+        ['half-life · TTL','30 d · 90 d'],['ADWIN','sin drift']],
+  gate:['cant','cs_lower −0.04 &lt; min_effect_to_act 0.08  →  SIN EFECTO. Solo se observa.'],
+  effect:'observe_only',
+  note:'Aquí está la diferencia con el dashboard original: una afirmación de alpha con 63 casos no cambia nada. El sistema es rápido con bugs y muy lento con edge — ese es el comportamiento correcto.',
+  conf:'declarada 0.79 → calibrada 0.44'},
+
+ {open:false,cls:'risk',id:'H-3d80',st:'CONFIRMADA 27/08 · en vigor desde entonces · TTL restante 43 d',
+  claim:'En la hora previa a una publicación de CPI, el slippage de las entradas market en alts fuera del top-50 se multiplica por más de 2.5× respecto a su mediana.',
+  pred:'Métrica: slippage_bps / mediana_30d · H0: ratio ≤ 1.0 · H1: ratio ≥ 2.0<br>Test: binomial + martingala · prior Beta(40,40)',
+  rows:[['n_observed · clústeres','52 · 17'],['n_effective','19.6'],
+        ['n_required','18 &nbsp;<span style="color:#5a5f66">prop. test, p1=0.72</span>'],
+        ['log₁₀ E_t','3.14 &nbsp;(umbral 2.00)'],['confidence seq. 99%','[0.63, 0.91]'],
+        ['posterior','media 0.744'],['e-BH','q 0.018 · rank 5/47 · PASA'],
+        ['min_effect_to_act','0.55'],['out-of-sample','ok · 31 obs post-registro'],
+        ['Page-Hinkley','sin cambio']],
+  gate:['can','cs_lower 0.63 &gt; min_effect_to_act 0.55  →  CAN_ACT ✓'],
+  effect:'extend_cooldown{minutes: 75, scope: alts_beyond_top50} + size_multiplier{0.50}',
+  note:'Efecto monótono hacia menos riesgo: alarga el cooldown y reduce tamaño. No puede abrir nada ni ensanchar ningún límite.',
+  conf:'declarada 0.88 → calibrada 0.67'},
+
+ {open:false,cls:'defect',id:'H-5a11',st:'CONFIRMADA 02/09 · corregida en el commit 4e9b1a · retirada',
+  claim:'Tras un reinicio del <code>order-router</code>, la primera iteración contabilizaba dos veces las posiciones abiertas, duplicando el apalancamiento efectivo y reduciendo a la mitad la distancia a liquidación.',
+  pred:'H0: P(posición duplicada | reinicio) ≤ 0.01 · observado 3/3',
+  rows:[['out-of-sample','3 / 3'],['n_effective','2.8'],['n_required','2'],
+        ['p exacto','1.0×10⁻⁶'],['e-BH','q 0.002 · PASA'],['acción tomada','fix + test de regresión']],
+  gate:['can','Resuelta. La posición ahora se deriva de fills, nunca de memoria.'],
+  effect:'retired',
+  note:'El hallazgo más valioso que ha producido el motor hasta ahora: vale más que cualquier señal que el LLM pueda generar.',
+  conf:'declarada 0.92 → calibrada 0.71'}
+];
+
+const hypHTML=h=>`<div class="hyp">
+  <div class="top">
+    <span class="cls ${h.cls}">${h.cls}</span>
+    <span class="hid">${h.id}</span>
+    <span class="st">${h.st}</span>
+  </div>
+  <p class="claim">${h.claim}</p>
+  <p class="pred"><b style="color:var(--ink-3);font-size:10px;letter-spacing:.08em">PREDICCIÓN FALSABLE (pre-registrada)</b><br>${h.pred}</p>
+  <div class="rows">${h.rows.map(([k,v])=>`<div><span>${k}</span><span>${v}</span></div>`).join('')}</div>
+  <div class="gate ${h.gate[0]}">${h.gate[1]}</div>
+  <div class="rows" style="margin-top:10px"><div><span>efecto permitido</span><span>${h.effect}</span></div>
+  <div><span>confianza del LLM</span><span><span class="strike">${h.conf.split('→')[0].trim()}</span> → ${h.conf.split('→')[1].trim()}
+   <span style="color:#5a5f66">· no usada para decidir</span></span></div></div>
+  <p class="note">${h.note}</p></div>`;
+
+document.getElementById('hyp-open').innerHTML=HYP.filter(h=>h.open).map(hypHTML).join('');
+document.getElementById('hyp-conf').innerHTML=HYP.filter(h=>!h.open).map(hypHTML).join('');
+
+// ============================================================ salud
+(()=>{
+  const rows=[
+    ['coinbase · ws ticker','ok',   '0.8 s','2','0','28 / 30 rps','142 ms'],
+    ['coinbase · ws user',  'ok',   '1.2 s','2','0','—','—'],
+    ['kraken · ws book',    'ok',   '0.4 s','5','0','18 / 20 rps','118 ms'],
+    ['derivs · funding+OI', 'ok',   '41 s','0','0','32 / 40 rpm','—'],
+    ['derivs · liquidaciones','ok', '6.3 s','1','0','—','—'],
+    ['altdata · FRED/DVOL', 'ok',   '19 min','0','0','8 / 120 rpm','—'],
+    ['order-router',        'ok',   '—','0','0','—','96 ms'],
+    ['reconciler',          'ok',   'hace 3 min','0','0','—','—'],
+    ['llm-analyst',         'degradado','hace 12 min','0','0','presupuesto 81%','—']
+  ];
+  document.querySelector('#t-health tbody').innerHTML=rows.map(r=>{
+    const ok=r[1]==='ok';
+    return `<tr><td style="color:var(--ink)">${r[0]}</td>
+      <td style="text-align:left"><span style="color:${ok?'var(--good)':'var(--warning)'}">${ok?'●':'▲'} ${r[1]}</span></td>
+      <td>${r[2]}</td><td>${r[3]}</td>
+      <td style="color:${r[4]==='0'?'var(--ink-2)':'var(--critical)'}">${r[4]}</td>
+      <td>${r[5]}</td><td>${r[6]}</td></tr>`}).join('');
+})();
+
+// ============================================================ tabs + reloj
+document.querySelectorAll('nav.tabs button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('nav.tabs button').forEach(x=>x.setAttribute('aria-selected',x===b));
+  ['live','pnl','learn','health'].forEach(id=>document.getElementById(id).hidden=(id!==b.dataset.t));
+});
+const tick=()=>document.getElementById('clk').textContent=
+  new Date().toISOString().slice(11,19)+' UTC';
+tick(); setInterval(tick,1000);
+</script>
+</body>
+</html>

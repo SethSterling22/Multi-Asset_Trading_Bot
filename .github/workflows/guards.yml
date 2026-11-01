@@ -1,0 +1,17 @@
+# tests/guards/ es requisito de merge y no puede fallar nunca (CLAUDE.md §1.8).
+name: guards
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  guards:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.3  # sin tag flotante de major: se fija la versión
+      - name: Instalar dependencias de desarrollo
+        run: uv sync --locked --no-default-groups --group dev
+      - name: pytest -m guards
+        run: uv run --no-sync pytest -m guards
