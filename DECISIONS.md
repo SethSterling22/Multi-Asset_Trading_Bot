@@ -139,3 +139,31 @@ informe; aquí queda el resumen y la sección donde se justifica cada una.
     para que la suma sea exacta.
   - `core/metrics.py` recibe la anualización explícita (`periods_per_year`) y
     devuelve `None`, no 0.0, para las métricas que no se pueden calcular.
+
+---
+
+## 2026-11-01 · D-005 · Gate de la Sesión 1 (Fase 0.1–0.2): verde
+
+- **Entorno:** PostgreSQL 17.11 + TimescaleDB 2.31.0 (`docker/compose.dev.yml`,
+  imagen `timescale/timescaledb-ha:pg17`).
+- **Resultado:**
+  - `pytest -m "not integration"`: 76 passed, incluidos los 12 tests `db` (migración
+    de ida y vuelta, idempotencia, append-only, CHECKs, vista `positions` == replay).
+  - `ruff check .` y `mypy core risk` limpios.
+  - `scripts/synthetic_fills.py` con `--database-url`: 200 fills en 5 sleeves y 50
+    snapshots diarios por sleeve; las cuatro comprobaciones contables pasan, lo
+    releído de Postgres es idéntico y la vista coincide con el replay. La
+    transacción se deshace: la base queda sin fills sintéticos.
+  - La migración crea las 6 hipertablas, la compresión y la retención del schema de
+    referencia (sin retención en `liquidations`) y los dos agregados continuos con
+    su política de refresco.
+- **Verificación a mano:** los resultados de los fixtures (`tests/ledger/fixtures.py`,
+  `test_attribution.py`) están calculados a mano en sus comentarios. En la salida del
+  script se comprobaron a mano el slippage, la comisión y el signo del funding de los
+  primeros fills de `trend`; el resto lo cubren las identidades contables, que no
+  reutilizan el método de coste medio.
+- **Pendiente de la Fase 0.1:** "posición reconstruida desde `fills` == snapshot del
+  exchange" necesita un broker real o su sandbox; aquí se cumple contra snapshots
+  conocidos. Se cierra con la reconciliación (Sesión 5).
+- **Siguiente:** Sesión 2 (Fase 0.3–0.6): delta real, `strategies/base.py`, los 10
+  grupos de `tests/guards/` y `risk/breakers.py`.

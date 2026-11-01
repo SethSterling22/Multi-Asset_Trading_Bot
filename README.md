@@ -7,8 +7,8 @@ to maximise any single strategy's Sharpe but to keep the strategies
 
 **Status: migrating from scaffold to platform.** The repo is following the plan
 in [docs/INFORME_TALOS.md](docs/INFORME_TALOS.md). Session 0 (layout, tooling,
-CI, risk floor guard) is done; Session 1 (Phase 0.1–0.2: ledger, metrics,
-structured logging) is in progress. The
+CI, risk floor guard) and Session 1 (Phase 0.1–0.2: ledger, metrics, structured
+logging) are done; Session 2 (real delta, shared guards) is next. The
 only runnable code is still the legacy scaffold below, and **it is not fit for
 live capital** (see [Known gaps](#known-gaps-in-the-legacy-code)).
 
