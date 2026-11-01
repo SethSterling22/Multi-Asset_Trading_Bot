@@ -6,8 +6,9 @@ readme = "README.md"
 license = { file = "LICENSE" }
 # Lumibot solo está clasificado hasta 3.12 (CLAUDE.md §2).
 requires-python = ">=3.12,<3.13"
-# Lo que importa core/ (ledger, logging): lo necesitan todos los servicios y CI.
+# Lo que importa core/ (config, ledger, logging): lo necesitan todos los servicios y CI.
 dependencies = [
+    "pydantic>=2.7",
     "sqlalchemy>=2.0",
     "psycopg[binary]>=3.2",
     "structlog>=24.4",
@@ -20,7 +21,6 @@ engine = [
     "lumibot>=3.8",
     "alpaca-py>=0.30",
     "coinbase-advanced-py>=1.7",
-    "pydantic>=2.7",
     "pandas>=2.2",
     "python-dotenv>=1.0",
     "alembic>=1.13",
@@ -63,10 +63,7 @@ line-length = 100
 extend-exclude = [
     # Material de referencia del informe: se conserva literal, no se lintea.
     "docs",
-    # Código heredado pendiente de refactor (sesiones 1, 2 y 7). No se toca todavía.
-    "config_models.py",
-    "wheel_strategy.py",
-    "crypto_rebalancer.py",
+    # Código heredado pendiente de jubilar (sesión 7). No se toca todavía.
     "app_dashboard.py",
 ]
 
@@ -89,7 +86,7 @@ ignore = [
 # --------------------------------------------------------------------------- #
 [tool.mypy]
 python_version = "3.12"
-files = ["core", "risk"]
+files = ["core", "risk", "strategies/base.py", "strategies/wheel/logic.py"]
 strict = true
 warn_unreachable = true
 
