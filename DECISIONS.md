@@ -84,3 +84,14 @@ informe; aquí queda el resumen y la sección donde se justifica cada una.
     añade su grupo al workflow.
 - **Pendiente:** cablear `assert_no_mutation()` en el arranque de cada servicio. No
   hay servicios todavía; se hace al crear el primero (`strategies/base.py`, Sesión 2).
+
+---
+
+## 2026-11-01 · D-003 · Se elimina `requirements.txt`
+
+- **Contexto:** D-002 conservaba `requirements.txt` hasta que `RUNNING.md` dejase de
+  usarlo. `README.md` y `RUNNING.md` ya instalan con `uv sync`.
+- **Alternativas:** mantenerlo generado con `uv export`, para quien instale con pip.
+- **Motivo:** dos listas de dependencias se desincronizan. Todas sus dependencias
+  están en `pyproject.toml` y fijadas en `uv.lock`; el informe (§9.2, §9.3) ya preveía
+  sustituirlo.

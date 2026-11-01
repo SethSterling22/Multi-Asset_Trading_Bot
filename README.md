@@ -134,7 +134,7 @@ not patched in place:
 - **The legacy dashboard reads `logs/*.csv` that nothing writes**, and its
   "live trading" toggle only takes effect when the engine restarts.
 
-See [RUNNING.md](RUNNING.md) §0 for the original gap list.
+[RUNNING.md](RUNNING.md) §0 has the same list and what blocks live trading.
 
 ---
 
