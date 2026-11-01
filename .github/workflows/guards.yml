@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.3.3  # sin tag flotante de major: se fija la versión
       - name: Instalar dependencias de desarrollo
         run: uv sync --locked --no-default-groups --group dev
       - name: pytest -m guards
