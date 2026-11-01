@@ -189,6 +189,16 @@ uv run mypy core risk
 ```
 
 ```bash
+# 0b. Ledger against a local Postgres + TimescaleDB (dev only, localhost:5433)
+docker compose -f docker/compose.dev.yml up -d
+export TEST_DATABASE_URL=postgresql+psycopg://trading@127.0.0.1:5433/postgres
+uv run pytest -m db
+uv run python -m scripts.synthetic_fills --database-url "$TEST_DATABASE_URL"
+# Expected: all green, and the script ends with "todo idéntico" and
+#           "transacción deshecha": it never leaves the synthetic fills behind.
+```
+
+```bash
 # 1. Configuration is valid and parses
 uv run python config_models.py
 # Expected: "config.json is valid ✔" followed by the parsed config
@@ -446,6 +456,8 @@ performance record and your only forensic trail when something goes wrong.
 |---|---|
 | `ModuleNotFoundError` | Command run without `uv run`, or `uv sync` not run after pulling |
 | `RuntimeError: DATABASE_URL no está definida` | Alembic needs `DATABASE_URL` in the environment; it is never read from `alembic.ini` |
+| `TEST_DATABASE_URL no está definida` | The `db` tests need the dev database (§4, step 0b); they fail rather than skip. Use `pytest -m "not db"` to exclude them on purpose |
+| `permission denied ... docker.sock` | The Docker daemon is stopped or your user is not in the `docker` group. Start it yourself; membership of `docker` is root-equivalent |
 | `RuntimeError: RISK FLOOR MUTADO EN RUNTIME` | Something patched a constant in `core/risk_floor.py` at runtime. Stop and find it; never work around it |
 | `KeyError: 'ALPACA_API_KEY'` | `.env` missing or not loaded; confirm the file exists and the variable name matches |
 | `ValidationError` on startup | `config.json` violates a model rule — the error names the offending field |

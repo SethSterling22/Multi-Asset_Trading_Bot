@@ -7,7 +7,8 @@ to maximise any single strategy's Sharpe but to keep the strategies
 
 **Status: migrating from scaffold to platform.** The repo is following the plan
 in [docs/INFORME_TALOS.md](docs/INFORME_TALOS.md). Session 0 (layout, tooling,
-CI, risk floor guard) is done; Phase 0 (instrumentation) has not started. The
+CI, risk floor guard) is done; Session 1 (Phase 0.1–0.2: ledger, metrics,
+structured logging) is in progress. The
 only runnable code is still the legacy scaffold below, and **it is not fit for
 live capital** (see [Known gaps](#known-gaps-in-the-legacy-code)).
 
@@ -62,17 +63,25 @@ uv sync                         # all service groups: engine, api, llm, dev
 uv run pre-commit install       # ruff + gitleaks on every commit
 ```
 
+The ledger tests (marker `db`) run against a local Postgres + TimescaleDB:
+
+```bash
+docker compose -f docker/compose.dev.yml up -d     # localhost:5433, dev only
+export TEST_DATABASE_URL=postgresql+psycopg://trading@127.0.0.1:5433/postgres
+```
+
 The checks that gate every change:
 
 ```bash
 uv run pytest                   # all tests; `-m guards` is what CI runs
 uv run ruff check .
 uv run mypy core risk           # strict
-DATABASE_URL=postgresql+psycopg://trading@localhost:5432/trading uv run alembic current
+uv run python -m scripts.synthetic_fills --database-url "$TEST_DATABASE_URL"
 ```
 
-Alembic reads the database URL from `DATABASE_URL` only, never from
-`alembic.ini`. Each service installs only its own dependency group
+Without `TEST_DATABASE_URL` the `db` tests fail instead of being skipped; run
+`uv run pytest -m "not db"` to leave them out on purpose. Alembic reads the
+database URL from `DATABASE_URL` only, never from `alembic.ini`. Each service installs only its own dependency group
 (`uv sync --no-default-groups --group engine`).
 
 ### Running the legacy scaffold (paper only)
