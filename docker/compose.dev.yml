@@ -1,0 +1,29 @@
+# Postgres + TimescaleDB SOLO para desarrollo y tests del ledger.
+# Misma imagen que docker/compose.yml para no probar contra otra versión.
+#
+#   docker compose -f docker/compose.dev.yml up -d
+#   export TEST_DATABASE_URL=postgresql+psycopg://trading@127.0.0.1:5433/postgres
+#
+# Sin contraseña (trust) y escuchando SOLO en 127.0.0.1: no es alcanzable desde la
+# red y no hay secreto que filtrar. Nunca uses esta configuración fuera de tu máquina.
+name: trading-dev
+
+services:
+  postgres:
+    image: timescale/timescaledb-ha:pg17
+    environment:
+      POSTGRES_USER: trading
+      POSTGRES_DB: trading
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - pgdata-dev:/home/postgres/pgdata
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trading -d trading"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  pgdata-dev:

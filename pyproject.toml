@@ -6,7 +6,12 @@ readme = "README.md"
 license = { file = "LICENSE" }
 # Lumibot solo está clasificado hasta 3.12 (CLAUDE.md §2).
 requires-python = ">=3.12,<3.13"
-dependencies = []
+# Lo que importa core/ (ledger, logging): lo necesitan todos los servicios y CI.
+dependencies = [
+    "sqlalchemy>=2.0",
+    "psycopg[binary]>=3.2",
+    "structlog>=24.4",
+]
 
 # Un grupo por servicio. Cada contenedor instala solo el suyo
 # (`uv sync --no-default-groups --group <servicio>`); en desarrollo se instalan todos.
@@ -18,9 +23,7 @@ engine = [
     "pydantic>=2.7",
     "pandas>=2.2",
     "python-dotenv>=1.0",
-    "sqlalchemy>=2.0",
     "alembic>=1.13",
-    "psycopg[binary]>=3.2",
     "redis>=5.0",
 ]
 api = [
@@ -75,7 +78,11 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101"]
+"tests/**" = ["S101", "S311"]
+# Generadores de datos sintéticos: aleatoriedad reproducible, no criptográfica.
+"scripts/**" = ["S311"]
+# DDL estático compuesto con constantes del propio fichero, sin input externo.
+"migrations/versions/**" = ["S608"]
 
 # --------------------------------------------------------------------------- #
 # mypy — strict en core/ y risk/                                               #
@@ -97,4 +104,5 @@ markers = [
     "guards: tests de guards que no pueden fallar nunca (CLAUDE.md §1.8)",
     "stats: tests de propiedad de core/stats",
     "integration: tests contra sandbox/testnet; requieren red y credenciales de prueba",
+    "db: tests contra Postgres + TimescaleDB; requieren TEST_DATABASE_URL",
 ]

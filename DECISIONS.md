@@ -95,3 +95,75 @@ informe; aquí queda el resumen y la sección donde se justifica cada una.
 - **Motivo:** dos listas de dependencias se desincronizan. Todas sus dependencias
   están en `pyproject.toml` y fijadas en `uv.lock`; el informe (§9.2, §9.3) ya preveía
   sustituirlo.
+
+---
+
+## 2026-11-01 · D-004 · Ledger (Sesión 1): desviaciones del schema de referencia
+
+- **Contexto:** migración `0001` con las secciones 0–2 de `docs/schema_reference.sql`
+  y `core/ledger/`. Al implementarlas aparecieron cinco problemas del schema de
+  referencia que harían mentir al ledger.
+- **Decisiones:**
+  1. **El slippage se restaba dos veces.** La vista `pnl_by_strategy_day` define
+     `gross_pnl = Σ realized_pnl` y `net = gross − fees + funding − slippage`. Si
+     `realized_pnl` se calcula con los precios de ejecución, el coste de ejecución
+     ya está dentro y restarlo otra vez subestima el neto (en el fixture de los
+     tests: 6.29 en lugar de 8.29). Se mantiene la fórmula y los signos de
+     CLAUDE.md §3.4, y se define `gross_pnl` = P&L realizado a precios de fill +
+     slippage, es decir, a precios de decisión. Así `net_pnl` = realizado − fees +
+     funding, exacto, y el slippage sigue visible en el waterfall.
+  2. **`fills.realized_pnl` no se almacena.** Depende del orden de los fills, y un
+     gap-fill que inserte un fill antiguo dejaría mal todos los posteriores en una
+     tabla que no admite UPDATE. Se deriva por replay con coste medio
+     (`core/ledger/positions.py`), igual que la posición (§1.3). Con 150–400
+     operaciones al año el replay es trivial.
+  3. **`fills.venue_fill_id` es NOT NULL.** Con NULL, la UNIQUE de idempotencia no
+     aplica y la doble inserción duplica. Funding y paper llevan un id determinista.
+  4. **`fills.multiplier`.** Sin él, el coste de una opción (×100) o de un perp con
+     tamaño de contrato (BIP = 0.01 BTC) sale mal en la vista `positions`.
+  5. **CHECKs y append-only por trigger.** `side` restringido a los seis valores
+     (un 'BUY' contaba como venta en la vista), `qty >= 0`, `price >= 0`,
+     `commission >= 0`. UPDATE, DELETE y TRUNCATE sobre `fills` y `risk_events`
+     lanzan excepción.
+- **Otras decisiones de la sesión:**
+  - `sqlalchemy`, `psycopg` y `structlog` pasan a `[project].dependencies`: los usa
+    `core/`, que importan todos los servicios y CI.
+  - Los tests `db` fallan sin `TEST_DATABASE_URL` en vez de saltarse: un gate que
+    pasa porque no ejecutó nada no es un gate.
+  - `docker/compose.dev.yml`: misma imagen que producción, sin contraseña (trust) y
+    escuchando solo en 127.0.0.1.
+  - La vista SQL de atribución (sección 6) no se crea todavía: necesita `decision` y
+    `llm_call` (sección 3), y el P&L realizado es path-dependent, así que la única
+    implementación es Python. El reparto del coste de IA ya está en
+    `core/ledger/attribution.py`; la última decisión se lleva el resto de la división
+    para que la suma sea exacta.
+  - `core/metrics.py` recibe la anualización explícita (`periods_per_year`) y
+    devuelve `None`, no 0.0, para las métricas que no se pueden calcular.
+
+---
+
+## 2026-11-01 · D-005 · Gate de la Sesión 1 (Fase 0.1–0.2): verde
+
+- **Entorno:** PostgreSQL 17.11 + TimescaleDB 2.31.0 (`docker/compose.dev.yml`,
+  imagen `timescale/timescaledb-ha:pg17`).
+- **Resultado:**
+  - `pytest -m "not integration"`: 76 passed, incluidos los 12 tests `db` (migración
+    de ida y vuelta, idempotencia, append-only, CHECKs, vista `positions` == replay).
+  - `ruff check .` y `mypy core risk` limpios.
+  - `scripts/synthetic_fills.py` con `--database-url`: 200 fills en 5 sleeves y 50
+    snapshots diarios por sleeve; las cuatro comprobaciones contables pasan, lo
+    releído de Postgres es idéntico y la vista coincide con el replay. La
+    transacción se deshace: la base queda sin fills sintéticos.
+  - La migración crea las 6 hipertablas, la compresión y la retención del schema de
+    referencia (sin retención en `liquidations`) y los dos agregados continuos con
+    su política de refresco.
+- **Verificación a mano:** los resultados de los fixtures (`tests/ledger/fixtures.py`,
+  `test_attribution.py`) están calculados a mano en sus comentarios. En la salida del
+  script se comprobaron a mano el slippage, la comisión y el signo del funding de los
+  primeros fills de `trend`; el resto lo cubren las identidades contables, que no
+  reutilizan el método de coste medio.
+- **Pendiente de la Fase 0.1:** "posición reconstruida desde `fills` == snapshot del
+  exchange" necesita un broker real o su sandbox; aquí se cumple contra snapshots
+  conocidos. Se cierra con la reconciliación (Sesión 5).
+- **Siguiente:** Sesión 2 (Fase 0.3–0.6): delta real, `strategies/base.py`, los 10
+  grupos de `tests/guards/` y `risk/breakers.py`.
