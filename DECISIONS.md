@@ -248,3 +248,53 @@ informe; aquí queda el resumen y la sección donde se justifica cada una.
 - **Siguiente:** Sesión 3 (Fase 0.7–0.8): backtest con DSR, PBO y N registrado, y
   el grabador de liquidaciones y OI. El grabador depende del punto 9 de la §13
   (Coinalyze), sin verificar.
+
+---
+
+## 2026-11-01 · D-008 · Sesión 3, parte 1: backtest con DSR, PBO y N registrado
+
+- **Contexto:** Fase 0.7. El grabador de liquidaciones y OI (Fase 0.8, la otra mitad
+  de la sesión) queda para cuando haya API key de Coinalyze (§13 punto 9).
+- **Decisiones:**
+  1. **El backtest ejecuta el código de producción.** `backtest/engine.py` corre el
+     `CryptoRebalancer` real (con sus guards de caja y holdings) contra un broker
+     simulado con comisión y slippage. Para eso la base acepta `StaticParams` además
+     de `config.json`. No se simulan kill switch ni pérdida diaria: miden el estado
+     del sistema, no la decisión.
+  2. **Sin look-ahead:** se decide al cierre de t y se ejecuta a la apertura de t+1.
+  3. **Comisión y slippage no tienen valor por defecto.** La ejecución del gate usa
+     60 bps de comisión y 5 bps de slippage por lado: **supuesto sin verificar** sobre
+     Coinbase Advanced (la §13 no cubre las comisiones spot). El USDC en caja rinde 0.
+  4. **N en `search_log`** (migración `0002`): append-only por trigger, porque borrar
+     filas desinflaría N, y `UNIQUE (kind, strategy_id, params_hash)`. El hash incluye
+     la ventana y los supuestos de coste: re-ejecutar la misma configuración no cuenta
+     dos veces; cambiar cualquier cosa, sí. El CLI exige la base de datos: un
+     registro en memoria olvidaría las pruebas de la sesión anterior.
+  5. **El informe no imprime Sharpe** (ni Sortino, que tiene el mismo problema).
+     Imprime DSR, PBO y N, y falla si el candidato no está registrado. El candidato es
+     el mejor in-sample del barrido: exactamente la elección que el DSR deflacta.
+  6. **DSR en `core/stats/deflated_sharpe.py`, en Python puro** (sin numpy en
+     `core/`). Su umbral reproduce la tabla del informe §2.4. PBO por CSCV en
+     `backtest/cscv.py`, también en Python puro, con 16 bloques (12,870 combinaciones).
+  7. **Dos benchmarks:** BTC buy-and-hold (lo pide el informe, gane o pierda) y los
+     mismos pesos comprados el primer día sin rebalancear, que es el que aísla lo que
+     aporta el rebalanceo.
+- **Ambigüedad del informe:** el gate de la Fase 2 dice "DSR > 0", pero el DSR de
+  Bailey y López de Prado es una probabilidad en [0, 1], siempre > 0. El informe
+  imprime la probabilidad; > 0.5 equivale a superar el máximo esperado por azar, y
+  > 0.95 es significativo. **Hay que decidir cuál de los dos es el gate** antes de la
+  Fase 2.
+- **Fallo de lógica del rebalanceador encontrado por el barrido** (no corregido, es
+  una decisión de estrategia): partiendo de 100% USDC, si el umbral es mayor que el
+  peso objetivo por activo, la desviación nunca lo alcanza y **no compra nunca**. Con
+  umbral 0.20 y 30% cripto (15% por activo) el backtest sale plano y se descarta. Con
+  el `config.json` actual (umbral 0.05, 20% por activo) no ocurre.
+- **Resultado** (`docs/backtests/crypto_rebalance_2023-11-01_2026-10-31.md`): 3 años
+  de velas diarias reales de Coinbase (BTC y ETH, 1,096 días sin huecos), 20
+  configuraciones (1 descartada). **DSR 0.832, PBO 0.490, N 20.** El mejor (umbral
+  0.10, 60% USDC) hizo +42.4% neto frente a +117.1% de BTC HODL y +27.6% de los
+  mismos pesos sin rebalancear, con drawdown −29.7% frente a −53.1% y −39.2%.
+  **No es evidencia de edge:** DSR < 0.95 y un PBO al nivel del azar.
+- **Gate de la Sesión 3, parte del backtest:** verde ("backtest de crypto_rebalance
+  sobre ≥2 años de datos reales produce un informe con DSR, PBO y N"). El resto del
+  gate (grabador ≥48 h sin huecos, prueba de caos del ingester) sigue pendiente.

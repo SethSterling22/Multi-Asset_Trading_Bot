@@ -9,7 +9,8 @@ to maximise any single strategy's Sharpe but to keep the strategies
 in [docs/INFORME_TALOS.md](docs/INFORME_TALOS.md). Session 0 (layout, tooling,
 CI, risk floor guard), Session 1 (Phase 0.1–0.2: ledger, metrics, structured
 logging) and Session 2 (Phase 0.3–0.6: real delta, shared guards, breakers,
-kill switch) are done; Session 3 (honest backtest, data recorder) is next. The
+kill switch) are done. Session 3 is half done: the honest backtest is in; the
+data recorder waits on a Coinalyze API key (informe §13, point 9). The
 only runnable code is still the legacy scaffold below, and **it is not fit for
 live capital** (see [Known gaps](#known-gaps-in-the-legacy-code)).
 
@@ -40,7 +41,8 @@ live capital** (see [Known gaps](#known-gaps-in-the-legacy-code)).
 | `docs/dashboard_mockup.html` | Visual reference for the new dashboard |
 | [core/risk_floor.py](core/risk_floor.py) | Risk limits as **Python constants**, hash-verified. Never config |
 | `core/`, `risk/`, `strategies/` | In use: config, ledger, greeks, metrics, logging; pre-trade checks, breakers, kill switch, LLM action space; the strategies and their shared guards (`strategies/base.py`) |
-| `brokers/`, `data/`, `execution/`, `llm/`, `api/`, `web/`, `backtest/` | Rest of the target tree (informe §9.2), still empty |
+| `backtest/` | Backtest engine (runs the live strategy code), CSCV/PBO, the N registry and the report. Results in `docs/backtests/` |
+| `brokers/`, `data/`, `execution/`, `llm/`, `api/`, `web/` | Rest of the target tree (informe §9.2), still empty |
 | `tests/guards/` | Guard tests that must never fail; required to merge |
 | `docker/compose.yml` | Homelab stack (Compose + Traefik), reference for Phase 1 |
 
@@ -85,6 +87,20 @@ Without `TEST_DATABASE_URL` the `db` tests fail instead of being skipped; run
 `uv run pytest -m "not db"` to leave them out on purpose. Alembic reads the
 database URL from `DATABASE_URL` only, never from `alembic.ini`. Each service installs only its own dependency group
 (`uv sync --no-default-groups --group engine`).
+
+### Backtest
+
+```bash
+uv run python -m backtest --start 2023-11-01 --end 2026-10-31 \
+    --fee-bps 60 --slippage-bps 5 --database-url "$DATABASE_URL"
+```
+
+The report prints the Deflated Sharpe Ratio, the PBO and N, and **never a plain
+Sharpe**: the best of N variants with no edge looks good by chance. Every
+configuration tried is recorded in `search_log` (append-only), including
+discarded ones, and the report refuses to run without it. Fees and slippage
+have no defaults because they are assumptions about the venue. Daily candles
+come from Coinbase's public API (no key) and are cached in `.cache/`.
 
 ### Running the strategies (paper only)
 
