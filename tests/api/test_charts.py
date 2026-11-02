@@ -37,6 +37,30 @@ def test_degenerate_inputs() -> None:
     assert "Sin datos" in waterfall([])
 
 
+def axis_labels(svg: str) -> list[str]:
+    return [t.text or "" for t in parse(svg).findall("{http://www.w3.org/2000/svg}text")
+            if t.get("text-anchor") == "end"]
+
+
+def test_flat_equity_does_not_repeat_axis_labels() -> None:
+    svg = line_chart({"crypto": [(T, 10000.0), (T + timedelta(hours=1), 10000.0)]},
+                     y_format=lambda v: f"${v:,.0f}")
+    labels = axis_labels(svg)
+    assert len(labels) == len(set(labels)) >= 2
+    assert "$10,000" in labels
+
+
+def test_axis_ticks_are_round_numbers() -> None:
+    svg = line_chart({"s": [(T, 9873.0), (T + timedelta(hours=1), 10412.0)]},
+                     y_format=lambda v: f"{v:.0f}")
+    assert all(int(label) % 100 == 0 for label in axis_labels(svg))
+
+
+def test_single_point_is_drawn_as_a_dot() -> None:
+    root = parse(line_chart({"one": [(T, 10000.0)]}))
+    assert len(root.findall("{http://www.w3.org/2000/svg}circle")) == 1
+
+
 def test_waterfall_ends_on_the_net_figure() -> None:
     steps = [("Bruto", 10.0), ("Comisiones", -0.21), ("Funding", 0.5), ("Slippage", -2.0),
              ("IA", 0.0), ("Neto", 8.29)]
