@@ -8,6 +8,9 @@ Ejecutar (paper por defecto):
 
     DATABASE_URL=... REDIS_URL=... uv run python -m strategies.wheel
 
+Parar: Ctrl+C, o `pkill -f strategies.wheel` (SIGTERM) desde otra terminal. El
+proceso termina en los dos casos (strategies/runtime.py).
+
 Sin DATABASE_URL o sin REDIS_URL no arranca: sin ledger no hay registro que
 evaluar, y sin las tres fuentes el kill switch no existe (CLAUDE.md §1.7).
 
@@ -42,6 +45,7 @@ from strategies.base import (
     PostgresLedger,
     config_kill_source,
 )
+from strategies.runtime import run_process
 from strategies.wheel.logic import (
     VENUE,
     OptionContract,
@@ -241,4 +245,6 @@ def main() -> None:
     })
     trader = Trader()
     trader.add_strategy(WheelStrategy(broker=broker))
-    trader.run_all()
+    # Ctrl+C lo atiende Lumibot; SIGTERM y la salida final, run_process. Sin esto
+    # el proceso no muere: el hilo del WebSocket de Alpaca no es daemon.
+    run_process(trader.run_all, trader.stop_all)
