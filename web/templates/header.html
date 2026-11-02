@@ -1,0 +1,32 @@
+<header>
+  <div class="brand">MULTI&#8209;ASSET&nbsp;BOT <span>· Sadida</span></div>
+  {% if h.live is none %}<span class="pill bad">CONFIG INVÁLIDA</span>
+  {% elif h.live %}<span class="pill warn">LIVE · DINERO REAL</span>
+  {% else %}<span class="pill on">PAPER</span>{% endif %}
+  {% if h.kill_switch.active %}<span class="pill bad">PARADO · KILL SWITCH</span>
+  {% else %}<span class="pill on">NORMAL</span>{% endif %}
+  <span class="pill">archivo: última ejecución hace {{ h.archive_lag | ago }}</span>
+  <div class="spacer"></div>
+  <span class="clock">{{ h.now.strftime("%Y-%m-%d %H:%M:%S") }} UTC</span>
+</header>
+{% if h.kill_switch.active %}
+<ul class="reasons">{% for r in h.kill_switch.reasons %}<li>{{ r }}</li>{% endfor %}</ul>
+{% endif %}
+<div class="kpis">
+  <div class="kpi"><div class="lab">Equity</div><div class="val">{{ h.equity.equity | money }}</div>
+    <div class="sub">suma de los sleeves con snapshot</div></div>
+  <div class="kpi"><div class="lab">P&amp;L neto hoy</div>
+    <div class="val {{ h.today_net | cls }}">{{ h.today_net | money }}</div>
+    <div class="sub">realizado, día UTC</div></div>
+  <div class="kpi"><div class="lab">Equity hoy</div>
+    <div class="val {{ h.equity.day_change | cls }}">{{ h.equity.day_change | money }}</div>
+    <div class="sub">desde el primer snapshot del día</div></div>
+  <div class="kpi"><div class="lab">Max drawdown 30 d</div>
+    <div class="val {{ h.equity.drawdown | cls }}">{{ h.equity.drawdown | pct }}</div>
+    <div class="sub">peor sleeve</div></div>
+  <div class="kpi"><div class="lab">Posiciones</div>
+    <div class="val">{{ h.open_positions }} / {{ h.max_positions }}</div>
+    <div class="sub">abiertas / máximo del floor</div></div>
+  <div class="kpi"><div class="lab">Coste IA</div><div class="val">{{ h.ai_cost | money }}</div>
+    <div class="sub">sin capa LLM todavía</div></div>
+</div>
