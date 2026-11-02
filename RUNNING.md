@@ -231,6 +231,91 @@ filled.
 
 ---
 
+## 4b. Running on Sadida (Proxmox homelab node)
+
+Interim setup until the full Phase 1 compose (DECISIONS.md D-011). It runs the
+paper Wheel and the Coinalyze archiver continuously; it is **not** ready for real
+money (no SOPS, no off-host backups, no external dead-man's switch yet).
+
+**Before you start:** merge PR #6, so the Wheel stops cleanly on SIGTERM, and check
+what `/mnt/data` is (`lsblk -d -o NAME,ROTA,MODEL,SIZE,TRAN`; `ROTA 0` is SSD/NVMe).
+
+### On the Proxmox host
+
+1. Create a VM: Debian 13, 4 vCPU, 12 GB RAM, 200 GB disk on the `/mnt/data`
+   storage, and **Options → QEMU Guest Agent: enabled** (the battery watcher needs it).
+2. Limit the battery charge if the firmware allows it (a lithium battery at 100%
+   day and night swells):
+   ```bash
+   ls /sys/class/power_supply/AP21A7T/charge_control_end_threshold && \
+     echo 80 > /sys/class/power_supply/AP21A7T/charge_control_end_threshold
+   ```
+3. Install the battery watcher (laptop battery as UPS):
+   ```bash
+   install -m 755 ops/power/battery-watch.sh /usr/local/sbin/trading-battery-watch
+   install -m 644 ops/power/trading-battery-watch.service /etc/systemd/system/
+   mkdir -p /etc/trading && echo 'VMID=<vm id>' > /etc/trading/battery-watch.conf
+   systemctl daemon-reload && systemctl enable --now trading-battery-watch
+   ```
+   After 2 min on battery it activates the VM's kill switch; at 25% it shuts the VM
+   down cleanly. When power returns, **lift the kill switch yourself**
+   (`rm /run/trading/HALT` in the VM). A VM reboot clears it, because `/run` is tmpfs.
+
+### Inside the VM
+
+```bash
+sudo apt install -y qemu-guest-agent git curl && sudo systemctl enable --now qemu-guest-agent
+# Docker Engine + compose plugin: https://docs.docker.com/engine/install/debian/
+sudo useradd --system --create-home --shell /bin/bash trading     # home: /home/trading
+sudo install -d -o trading -g trading /opt/trading                 # the repo, apart from home
+sudo -u trading git clone https://github.com/SethSterling22/Multi-Asset_Trading_Bot.git /opt/trading
+```
+
+Then, as the `trading` user, install uv and the runtime dependencies:
+
+```bash
+sudo -iu trading
+curl -LsSf https://astral.sh/uv/install.sh | sh                  # into /home/trading/.local/bin
+cd /opt/trading && ~/.local/bin/uv sync --locked --no-default-groups --group engine
+exit
+```
+
+Secrets (interim, until SOPS) and data directory:
+
+```bash
+sudo install -d -m 750 -o root -g trading /etc/trading
+openssl rand -hex 24 | sudo tee /etc/trading/pg_password >/dev/null
+sudo chmod 600 /etc/trading/pg_password
+sudo install -m 640 -o root -g trading ops/systemd/trading.env.example /etc/trading/env
+sudo nano /etc/trading/env      # password, PAPER Alpaca keys, Coinalyze key
+sudo install -d -m 700 /srv/trading
+```
+
+Database, migrations and services:
+
+```bash
+cd /opt/trading
+sudo TRADING_DATA_DIR=/srv/trading docker compose -f docker/compose.runtime.yml up -d
+sudo -u trading bash -c 'set -a; . /etc/trading/env; .venv/bin/alembic upgrade head'
+sudo install -m 644 ops/systemd/trading-*.service ops/systemd/trading-*.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now trading-archiver.timer trading-wheel.service
+```
+
+Check it:
+
+```bash
+systemctl list-timers trading-archiver.timer
+journalctl -u trading-archiver -n 20
+journalctl -u trading-wheel -f
+sudo -u trading bash -c 'set -a; . /etc/trading/env; .venv/bin/python -m data.ingest.coinalyze report --hours 48'
+```
+
+Re-run the backtest once on Sadida so the N registry lives there too; the same 20
+configurations get the same hashes, so N stays 20 (README, "Backtest").
+
+---
+
 ## 5. Phase 1 — Backtesting
 
 Backtest before paper trading. It costs nothing and filters out broken logic
