@@ -6,6 +6,7 @@ y HTMX lo refresca. Todo texto que entra en el SVG se escapa.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime
 from html import escape
@@ -22,6 +23,17 @@ def _ticks(lo: float, hi: float, n: int = 4) -> list[float]:
         return [lo]
     step = (hi - lo) / n
     return [lo + i * step for i in range(n + 1)]
+
+
+def _nice_ticks(lo: float, hi: float, n: int = 4) -> list[float]:
+    """Marcas en múltiplos de 1, 2, 2.5 o 5 × 10^k dentro de [lo, hi]."""
+    if not hi > lo:
+        return [lo]
+    raw = (hi - lo) / n
+    magnitude = 10 ** math.floor(math.log10(raw))
+    step = next(m * magnitude for m in (1, 2, 2.5, 5, 10) if m * magnitude >= raw)
+    first = math.ceil(lo / step) * step
+    return [first + i * step for i in range(int((hi - first) / step + 1e-9) + 1)]
 
 
 def line_chart(
@@ -55,11 +67,18 @@ def line_chart(
 
     out = [f'<svg viewBox="0 0 {width} {height}" width="100%" role="img" '
            f'xmlns="http://www.w3.org/2000/svg">']
-    for v in _ticks(y0, y1):
+    previous = None
+    for v in _nice_ticks(y0, y1):
+        # Con un rango estrecho, dos marcas pueden dar la misma etiqueta al redondear
+        # (equity plana: "$10,000" tres veces). Se dibuja solo la primera.
+        label = y_format(v)
+        if label == previous:
+            continue
+        previous = label
         yy = y(v)
         out.append(f'<line class="gl" x1="{left}" x2="{left + w}" y1="{yy:.1f}" y2="{yy:.1f}"/>')
         out.append(f'<text class="ax" x="{left - 6}" y="{yy + 3.5:.1f}" '
-                   f'text-anchor="end">{escape(y_format(v))}</text>')
+                   f'text-anchor="end">{escape(label)}</text>')
     for t in _ticks(t0, t1, 4):
         label = datetime.fromtimestamp(t).strftime("%d %b %H:%M")
         out.append(f'<text class="ax" x="{x(t):.1f}" y="{height - 6}" '
@@ -72,6 +91,10 @@ def line_chart(
         path = " ".join(f"{x(p[0].timestamp()):.1f},{y(p[1]):.1f}" for p in pts)
         out.append(f'<polyline fill="none" stroke="{color}" stroke-width="1.8" '
                    f'points="{path}"><title>{escape(name)}</title></polyline>')
+        if len(pts) == 1:   # una polyline de un punto no se ve
+            cx, cy = x(pts[0][0].timestamp()), y(pts[0][1])
+            out.append(f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="3.5" fill="{color}">'
+                       f'<title>{escape(name)}</title></circle>')
     out.append("</svg>")
     return "".join(out)
 
