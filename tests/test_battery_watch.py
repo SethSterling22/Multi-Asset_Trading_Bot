@@ -19,13 +19,14 @@ def host(tmp_path: Path) -> dict[str, Path]:
     (ps / "ADP1" / "type").write_text("Mains\n")
     (ps / "AP21A7T").mkdir()
     (ps / "AP21A7T" / "type").write_text("Battery\n")
-    qm_log = tmp_path / "qm.log"
-    qm = tmp_path / "qm"
-    qm.write_text(f'#!/bin/sh\necho "$@" >> {qm_log}\n')
-    qm.chmod(0o755)
+    docker_log = tmp_path / "docker.log"
+    docker = tmp_path / "docker"
+    docker.write_text(f'#!/bin/sh\necho "$@" >> {docker_log}\n')
+    docker.chmod(0o755)
     conf = tmp_path / "battery-watch.conf"
-    conf.write_text("VMID=101\n")
-    return {"ps": ps, "qm": qm, "qm_log": qm_log, "state": tmp_path / "state", "conf": conf}
+    conf.write_text("COMPOSE_FILE=/opt/trading/docker/compose.runtime.yml\n")
+    return {"ps": ps, "docker": docker, "docker_log": docker_log, "halt": tmp_path / "run",
+            "state": tmp_path / "state", "conf": conf}
 
 
 def power(host: dict[str, Path], *, mains: bool, pct: int) -> None:
@@ -36,21 +37,26 @@ def power(host: dict[str, Path], *, mains: bool, pct: int) -> None:
 
 def tick(host: dict[str, Path], now: int) -> str:
     env = {**os.environ, "CONF": str(host["conf"]), "POWER_SUPPLY_DIR": str(host["ps"]),
-           "QM": str(host["qm"]), "STATE_DIR": str(host["state"]), "NOW": str(now)}
+           "DOCKER": str(host["docker"]), "HALT_DIR": str(host["halt"]),
+           "STATE_DIR": str(host["state"]), "NOW": str(now)}
     out = subprocess.run(["bash", str(SCRIPT), "--once"], env=env, capture_output=True,  # noqa: S603, S607
                          text=True, check=True)
     return out.stdout
 
 
-def qm_calls(host: dict[str, Path]) -> list[str]:
-    log = host["qm_log"]
+def docker_calls(host: dict[str, Path]) -> list[str]:
+    log = host["docker_log"]
     return log.read_text().splitlines() if log.exists() else []
+
+
+def halted(host: dict[str, Path]) -> bool:
+    return (host["halt"] / "HALT").exists()
 
 
 def test_on_mains_does_nothing(host: dict[str, Path]) -> None:
     power(host, mains=True, pct=100)
     tick(host, T0)
-    assert qm_calls(host) == []
+    assert docker_calls(host) == [] and not halted(host)
 
 
 def test_a_short_blip_is_ignored(host: dict[str, Path]) -> None:
@@ -59,24 +65,26 @@ def test_a_short_blip_is_ignored(host: dict[str, Path]) -> None:
     tick(host, T0 + 60)                      # < 120 s
     power(host, mains=True, pct=99)
     assert "restablecida" in tick(host, T0 + 70)
-    assert qm_calls(host) == []
+    assert docker_calls(host) == [] and not halted(host)
 
 
 def test_two_minutes_on_battery_activates_the_kill_switch_once(host: dict[str, Path]) -> None:
     power(host, mains=False, pct=90)
     tick(host, T0)
-    tick(host, T0 + 120)
-    tick(host, T0 + 180)
-    calls = qm_calls(host)
-    assert len(calls) == 1 and calls[0].startswith("guest exec 101 --")
-    assert "/run/trading/HALT" in calls[0]
+    assert not halted(host)
+    out = tick(host, T0 + 120)
+    assert halted(host) and "kill switch activado" in out
+    assert "kill switch activado" not in tick(host, T0 + 180)       # una sola vez
+    assert docker_calls(host) == []                                  # parar no es cerrar
 
 
-def test_low_battery_shuts_the_vm_down_cleanly_once(host: dict[str, Path]) -> None:
+def test_low_battery_stops_the_containers_cleanly_once(host: dict[str, Path]) -> None:
     power(host, mains=False, pct=24)
     tick(host, T0)
     tick(host, T0 + 30)
-    assert qm_calls(host).count("shutdown 101 --timeout 180") == 1
+    stops = [c for c in docker_calls(host) if c.endswith(" stop")]
+    assert stops == ["compose -f /opt/trading/docker/compose.runtime.yml"
+                     " --env-file /etc/trading/compose.env stop"]
 
 
 def test_power_back_does_not_lift_the_kill_switch(host: dict[str, Path]) -> None:
@@ -85,11 +93,10 @@ def test_power_back_does_not_lift_the_kill_switch(host: dict[str, Path]) -> None
     tick(host, T0 + 200)
     power(host, mains=True, pct=80)
     out = tick(host, T0 + 260)
-    assert "NO se levanta" in out
-    assert all("rm" not in c for c in qm_calls(host))
+    assert "NO se levanta" in out and halted(host)
 
 
-def test_without_vmid_it_refuses_to_run(host: dict[str, Path]) -> None:
+def test_without_compose_file_it_refuses_to_run(host: dict[str, Path]) -> None:
     host["conf"].write_text("")
     with pytest.raises(subprocess.CalledProcessError):
         tick(host, T0)

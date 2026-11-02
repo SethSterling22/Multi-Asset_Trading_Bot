@@ -1,16 +1,36 @@
-# Postgres + TimescaleDB y Redis para EJECUTAR el proyecto en una máquina propia
-# (Sadida, DECISIONS.md D-011). Interino hasta el compose completo de la Fase 1.
+# Ejecución del proyecto en Sadida, en contenedores sobre el Docker del host de
+# Proxmox (DECISIONS.md D-012). Interino hasta el compose completo de la Fase 1.
 #
-#   sudo install -d -m 700 /etc/trading
-#   openssl rand -hex 24 | sudo tee /etc/trading/pg_password >/dev/null
-#   sudo chmod 600 /etc/trading/pg_password
-#   TRADING_DATA_DIR=/srv/trading docker compose -f docker/compose.runtime.yml up -d
+#   sudo docker compose -f docker/compose.runtime.yml --env-file /etc/trading/compose.env up -d --build
 #
-# Diferencias con compose.dev.yml: contraseña leída de un fichero (no trust), Redis
-# con persistencia, datos en un directorio del host (TRADING_DATA_DIR) y reinicio
-# automático. Los dos puertos escuchan SOLO en 127.0.0.1: nada es alcanzable desde
-# la red; los procesos que los usan corren en la misma VM.
+# Secretos (interino hasta SOPS + age, Fase 1.2), fuera del repo y de la imagen:
+#   /etc/trading/pg_password   contraseña de Postgres                 (root, 0600)
+#   /etc/trading/env           claves de PAPER de Alpaca y Coinalyze  (root, 0600)
+#   /etc/trading/compose.env   TRADING_DATA_DIR=/mnt/data/trading
+#
+# Kill switch: /run/trading del host está montado en el Wheel (solo lectura).
+#   sudo mkdir -p /run/trading && sudo touch /run/trading/HALT     # para todo
 name: trading
+
+x-engine: &engine
+  build:
+    context: ..
+    dockerfile: docker/Dockerfile.engine
+  image: trading-engine:local
+  env_file: /etc/trading/env
+  environment:
+    # La contraseña se lee del secreto al arrancar; nunca va en un env_file.
+    PG_PASSWORD_FILE: /run/secrets/pg_password
+  secrets: [pg_password]
+  networks: [data]
+  # Construye DATABASE_URL con la contraseña del secreto y ejecuta el comando.
+  entrypoint:
+    - sh
+    - -c
+    - >
+      export DATABASE_URL="postgresql+psycopg://trading:$$(cat $$PG_PASSWORD_FILE)@postgres:5432/trading"
+      REDIS_URL="redis://redis:6379/0"; exec "$$@"
+    - engine
 
 services:
   postgres:
@@ -21,13 +41,14 @@ services:
       POSTGRES_DB: trading
       POSTGRES_PASSWORD_FILE: /run/secrets/pg_password
     secrets: [pg_password]
+    networks: [data]
+    # Solo para administrar desde el propio host (psql); nada escucha hacia la red.
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
       - ${TRADING_DATA_DIR:?define TRADING_DATA_DIR}/postgres:/home/postgres/pgdata
     shm_size: 1gb
-    # Al apagar, Postgres necesita tiempo para cerrar limpio (checkpoint).
-    stop_grace_period: 120s
+    stop_grace_period: 120s        # checkpoint limpio al apagar
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U trading -d trading"]
       interval: 10s
@@ -38,8 +59,7 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
-    ports:
-      - "127.0.0.1:6379:6379"
+    networks: [data]
     volumes:
       - ${TRADING_DATA_DIR:?define TRADING_DATA_DIR}/redis:/data
     healthcheck:
@@ -47,6 +67,40 @@ services:
       interval: 10s
       timeout: 3s
       retries: 12
+
+  # Migraciones: una vez, antes de cualquier otro proceso de la app.
+  migrate:
+    <<: *engine
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  # Archivador de Coinalyze cada 6 h. Ejecuta nada más arrancar: tras un corte de luz
+  # o un reinicio se pone al día enseguida (Coinalyze conserva ~25 h a 1 minuto).
+  archiver:
+    <<: *engine
+    command: ["python", "-m", "data.ingest.coinalyze", "run", "--every-hours", "6"]
+    restart: unless-stopped
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+
+  # El Wheel en PAPER (live_trading_mode=false en config.json).
+  wheel:
+    <<: *engine
+    command: ["python", "-m", "strategies.wheel"]
+    # Un bucle de caídas no es "reintentar": tras 5 fallos se queda parado.
+    restart: on-failure:5
+    stop_signal: SIGTERM           # parada ordenada (strategies/runtime.py), forzada a 30 s
+    stop_grace_period: 45s
+    volumes:
+      - /run/trading:/run/trading:ro    # fuente "fichero" del kill switch
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+
+networks:
+  data:
 
 secrets:
   pg_password:

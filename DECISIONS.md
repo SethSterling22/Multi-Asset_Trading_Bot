@@ -410,3 +410,35 @@ informe; aquí queda el resumen y la sección donde se justifica cada una.
   restauración, Traefik + Tailscale sin puertos abiertos y el dead-man's switch externo.
 - **Sin verificar todavía:** el tipo de disco de `/mnt/data` (SSD o mecánico) y qué más
   corre en Sadida.
+
+---
+
+## 2026-11-02 · D-012 · Sadida: contenedores en el Docker del host, no una VM (revisa D-011.1)
+
+- **Contexto:** D-011 proponía una VM dedicada. El usuario prefiere contenedores: Sadida
+  ya tiene Docker en el host de Proxmox, y no quiere virtualizar otro kernel.
+- **Alternativas:** VM (D-011); contenedor LXC con Docker dentro (problemas de nesting,
+  overlayfs y AppArmor).
+- **Decisión:** todo en `docker/compose.runtime.yml` sobre el Docker del host: Postgres,
+  Redis, `migrate` (una vez), `archiver` (bucle cada 6 h) y `wheel` (paper). Imagen
+  `docker/Dockerfile.engine`; `.dockerignore` deja fuera `.env` y cualquier secreto.
+  - Sustituye a las unidades systemd de D-011: las políticas de reinicio de compose
+    cubren lo mismo (`on-failure:5` para el Wheel; el archivador ejecuta al arrancar,
+    que equivale al `Persistent=true` del timer).
+  - Postgres y Redis solo en la red interna del compose; Postgres además en
+    `127.0.0.1:5432` del host para administrar con psql.
+  - El kill switch por fichero es `/run/trading/HALT` **del host**, montado en el Wheel
+    en solo lectura.
+  - El vigilante de batería actúa directamente: toca ese fichero y, con poca batería,
+    hace `docker compose stop` (SIGTERM al Wheel, 120 s para Postgres). Ya no hace falta
+    el agente de QEMU.
+- **Lo que se acepta al no usar VM:**
+  - Proxmox recomienda no correr servicios en el host; un daemon de Docker con root en
+    el hipervisor amplía el alcance de un contenedor comprometido a todo Sadida.
+    Aceptable para paper y datos públicos; **se revisa antes de la Fase 5**, cuando haya
+    claves de trading reales.
+  - Docker cambia las reglas de iptables (política FORWARD a DROP), lo que puede cortar
+    la red de las VM y LXC sobre `vmbr0`. Ya funciona así en Sadida; queda anotado por si
+    aparece al añadir otra VM.
+- **Rendimiento:** la diferencia real con una VM es memoria reservada (no se apartan
+  ~12 GB), no CPU: la carga es mínima (el archivador trabaja ~75 s cada 6 h).
