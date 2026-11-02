@@ -231,6 +231,76 @@ filled.
 
 ---
 
+## 4b. Running on Sadida (Proxmox homelab node)
+
+Interim setup until the full Phase 1 compose (DECISIONS.md D-012): containers on the
+Proxmox host's Docker, no VM. It runs the paper Wheel and the Coinalyze archiver
+continuously; it is **not** ready for real money (no SOPS, no off-host backups, no
+external dead-man's switch yet).
+
+**Before you start:** merge PRs #6, #7 and #8, and check what `/mnt/data` is
+(`lsblk -d -o NAME,ROTA,MODEL,SIZE,TRAN`; `ROTA 0` is SSD/NVMe).
+
+All commands run on Sadida, as root.
+
+1. Get the code and the secrets in place:
+   ```bash
+   git clone https://github.com/SethSterling22/Multi-Asset_Trading_Bot.git /opt/trading
+   cd /opt/trading
+   install -d -m 700 /etc/trading
+   openssl rand -hex 24 > /etc/trading/pg_password && chmod 600 /etc/trading/pg_password
+   install -m 600 docker/trading.env.example /etc/trading/env
+   nano /etc/trading/env        # PAPER Alpaca keys and the Coinalyze key
+   install -m 644 docker/compose.env.example /etc/trading/compose.env
+   install -d -m 700 /mnt/data/trading
+   ```
+2. Build and start everything (migrations run first, on their own):
+   ```bash
+   docker compose -f docker/compose.runtime.yml --env-file /etc/trading/compose.env up -d --build
+   docker compose -f docker/compose.runtime.yml --env-file /etc/trading/compose.env ps
+   ```
+3. Limit the battery charge if the firmware allows it (a lithium battery at 100% day
+   and night swells):
+   ```bash
+   ls /sys/class/power_supply/AP21A7T/charge_control_end_threshold && \
+     echo 80 > /sys/class/power_supply/AP21A7T/charge_control_end_threshold
+   ```
+4. Install the battery watcher (laptop battery as UPS):
+   ```bash
+   install -m 755 ops/power/battery-watch.sh /usr/local/sbin/trading-battery-watch
+   install -m 644 ops/power/trading-battery-watch.service /etc/systemd/system/
+   echo 'COMPOSE_FILE=/opt/trading/docker/compose.runtime.yml' > /etc/trading/battery-watch.conf
+   systemctl daemon-reload && systemctl enable --now trading-battery-watch
+   ```
+   After 2 min on battery it creates `/run/trading/HALT` (the Wheel's kill switch); at
+   25% it stops the containers cleanly. When power returns, **lift the kill switch
+   yourself** with `rm /run/trading/HALT`. A host reboot clears it, because `/run` is
+   tmpfs.
+
+Day to day (`C="docker compose -f docker/compose.runtime.yml --env-file /etc/trading/compose.env"`):
+
+```bash
+$C logs -f wheel                      # the Wheel
+$C logs --tail 20 archiver            # last archiver runs
+$C run --rm --no-deps archiver python -m data.ingest.coinalyze report --hours 48
+touch /run/trading/HALT               # kill switch: no new orders
+git pull && $C up -d --build          # deploy a new version
+```
+
+`run --rm --no-deps` (not `exec`) goes through the entrypoint, which is what sets
+`DATABASE_URL` and `REDIS_URL` from the secret.
+
+Re-run the backtest once on Sadida so the N registry lives there too; the same 20
+configurations get the same hashes, so N stays 20 (README, "Backtest"). The single
+quotes matter: `$DATABASE_URL` has to expand inside the container, not on the host.
+
+```bash
+$C run --rm --no-deps archiver sh -c 'python -m backtest --start 2023-11-01 \
+  --end 2026-10-31 --fee-bps 60 --slippage-bps 5 --database-url "$DATABASE_URL"'
+```
+
+---
+
 ## 5. Phase 1 — Backtesting
 
 Backtest before paper trading. It costs nothing and filters out broken logic

@@ -1,0 +1,19 @@
+# Lo que NUNCA entra en una imagen. Los secretos llegan en ejecución (env_file),
+# no en el build: una imagen con .env dentro es una clave publicada.
+.env
+.env.*
+!.env.example
+**/*.pem
+**/*secret*
+**/*password*
+
+# Entornos, cachés y datos locales: se regeneran o no pintan nada en la imagen.
+.venv
+.git
+.cache
+.mypy_cache
+.ruff_cache
+.pytest_cache
+**/__pycache__
+logs
+docs/backtests
