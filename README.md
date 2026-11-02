@@ -143,6 +143,34 @@ is gated by Phase 4 of the plan (60–90 days of paper), not by this flag.
 
 ---
 
+## How this project uses LLMs
+
+Two providers, **Anthropic** and **OpenAI**, behind a router, and a fallback
+ladder that ends in **deterministic mode**: if both APIs fail, the bot keeps
+trading on its rules (DECISIONS.md D-010). No local model.
+
+The LLM is **outside the decision loop**. It can veto an entry, shrink a size
+(multiplier in [0.25, 1.0]), tighten a stop or extend a cooldown; it can never
+open a position, enlarge one or touch the risk floor (CLAUDE.md §1.2). With that
+restriction, the worst case of a fully hallucinating model is a bot that does
+not trade.
+
+Where the models do work:
+
+1. **Building the system.** Claude Code and Codex write, review and debug the
+   code. It is the use with the best measured return (informe §5.4).
+2. **The nightly hypothesis engine.** The model proposes falsifiable hypotheses
+   in batch; deterministic statistics (e-values, e-BH, a sceptical prior) decide
+   whether any of them may act.
+3. **Feature extraction from news,** only if it beats a hand-labelled dataset
+   (F1 and the feature's information coefficient).
+
+Each role uses the **cheapest model that passes its measured gate**; a stronger
+model has to earn its cost. Every LLM call is logged and its cost is subtracted
+from the P&L of the strategies that used it.
+
+---
+
 ## Principles
 
 From the original roadmap, kept as-is:
