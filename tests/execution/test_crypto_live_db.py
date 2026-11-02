@@ -11,7 +11,6 @@ from typing import Any
 import pytest
 from sqlalchemy import Engine, create_engine, text
 
-from brokers.alpaca_crypto import pair
 from core import log
 from core.config.models import TradingConfig
 from core.ledger.fills import AssetType, Fill, Side, fetch_fills
@@ -29,6 +28,10 @@ from strategies.crypto_rebalance.live import (
 from strategies.crypto_rebalance.rebalancer import CryptoRebalancer
 from tests.conftest import alembic, throwaway_database
 from tests.execution.fakes import FakeVenue, never
+
+# CI corre los guards solo con el grupo `dev`, sin el SDK de Alpaca.
+pytest.importorskip("alpaca")
+from brokers.alpaca_crypto import pair
 
 BUDGET = D(10000)
 pytestmark = pytest.mark.db

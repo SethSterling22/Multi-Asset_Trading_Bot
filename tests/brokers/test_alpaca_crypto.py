@@ -10,6 +10,9 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+
+# CI corre los guards solo con el grupo `dev`, sin el SDK de Alpaca.
+pytest.importorskip("alpaca")
 import requests
 from alpaca.common.exceptions import APIError
 from alpaca.trading.client import TradingClient
