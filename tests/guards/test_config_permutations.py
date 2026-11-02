@@ -116,3 +116,16 @@ def test_inactive_system_closes_the_gate(tmp_path: Path) -> None:
     s = setup(Sleeve(), write_config(tmp_path, **{"system_status.active": False}))
     assert not s.trading_gate(equity=D(100_000)).ok
     assert [e["reason"] for e in events.rejections()] == ["inactive"]
+
+
+def test_static_params_revalidate_what_model_copy_skips() -> None:
+    # model_copy(update=...) NO pasa por los validadores: así se podría colar una
+    # config inválida en un barrido de backtest. StaticParams la revalida.
+    from strategies.base import StaticParams
+    base = TradingConfig.load(CONFIG_PATH)
+    sneaky = base.model_copy(update={"risk_guards": base.risk_guards.model_copy(
+        update={"daily_loss_limit_percentage": 0.50})})      # > floor, sin error
+    assert sneaky.risk_guards.daily_loss_limit_percentage == 0.50
+    with pytest.raises(ValidationError):
+        StaticParams(sneaky)
+    assert StaticParams(base).current() == base
