@@ -298,3 +298,50 @@ informe; aquí queda el resumen y la sección donde se justifica cada una.
 - **Gate de la Sesión 3, parte del backtest:** verde ("backtest de crypto_rebalance
   sobre ≥2 años de datos reales produce un informe con DSR, PBO y N"). El resto del
   gate (grabador ≥48 h sin huecos, prueba de caos del ingester) sigue pendiente.
+
+---
+
+## 2026-11-02 · D-009 · Coinalyze verificado (§13 punto 9) y archivador REST en lugar de WebSocket
+
+- **Contexto:** Fase 0.8, la segunda mitad de la Sesión 3. El informe pide un grabador
+  WebSocket de liquidaciones y OI. Antes de construirlo se verificó Coinalyze con una
+  key real (2026-11-02).
+- **Hechos verificados:**
+  - Gratis con key; 40 llamadas/min, y **cada símbolo de una petición cuenta como una
+    llamada**. La key va en la cabecera `api_key`.
+  - 28 exchanges y ~5,500 perpetuos. **No cubre los perps de EE.UU. de Coinbase**
+    (no hay ningún `BIP-…-CDE`): su "Coinbase" (`BTC-PERP` en USDC) es Coinbase
+    International, con solo 182 días de datos y el último del 2026-10-02. Kraken aparece
+    como Kraken Futures (`pf_xbtusd`); sin confirmar si es el libro de los perps US.
+  - **Diario completo:** BTCUSDT de Binance desde 2020-01-21 (OI, funding y
+    liquidaciones). **Pero con `convert_to_usd` el diario se corta en ~1,500 puntos**
+    (desde 2022-09): el diario de OI y liquidaciones se pide en unidad nativa.
+  - **Intradía de ~1,500–2,000 puntos**, medido: 1 min ≈ 1.1 días, 15 min ≈ 21 días,
+    1 h ≈ 83 días, 12 h ≈ 1,000 días.
+  - **Las liquidaciones son dispersas:** un intervalo sin liquidaciones no aparece.
+  - Kraken Futures tiene minutos sin dato en la propia fuente (9–17 al día en OI).
+  - **Sin verificar:** los términos de uso (la web no enlaza ninguno).
+- **Decisión: archivador REST (`data/ingest/coinalyze.py`), no WebSocket.**
+  - Con 25 h de retención a 1 minuto, una ejecución cada pocas horas no pierde nada, sin
+    sockets que vigilar y sin depender de que un exchange offshore acepte una IP de
+    EE.UU. 64 series (BTC y ETH en Binance, Bybit, OKX, Hyperliquid y Kraken Futures;
+    OI y liquidaciones a 1 min, funding y long/short a 1 h, y el diario de las tres) =
+    64 llamadas por ejecución, ~75 s.
+  - Datos crudos en `derivatives_metrics` (migración `0003`), no en `funding` ni
+    `liquidations`, que esperan eventos individuales y no barras. Tier T2: sin
+    retention policy.
+  - `ingest_runs` (append-only) registra la ventana que cubrió cada ejecución. Un hueco
+    es tiempo que ninguna cubrió; en series densas, también una barra que falta dentro
+    de lo cubierto. Las liquidaciones solo pueden tener lo primero.
+  - El informe separa **sin cubrir** (perdido), **retraso** desde la última ejecución
+    (> 12 h = el archivador está parado; el margen con 25 h de retención se acaba) y
+    **ausentes en la fuente** (informativo).
+  - El WebSocket runner de la Sesión 3 queda para los datos de mercado del propio venue
+    (Fase 2), donde sí hace falta.
+- **Consecuencia para `funding_carry`:** Coinalyze es contexto de mercado, no el funding
+  que cobraría el sleeve. El punto 6 de la §13 (histórico de funding de los perps US de
+  Coinbase) sigue abierto y sigue bloqueando ese sleeve.
+- **Gate de la Sesión 3, segunda mitad:** el código y el test de caos (una ejecución que
+  muere a mitad se rellena con la siguiente) están en verde. **Falta lo que solo da el
+  tiempo:** ≥ 48 h de ejecuciones con `report --hours 48` en 0 problemas. Primera
+  ejecución real: 88,486 filas, 0 problemas en 20 h.

@@ -213,6 +213,22 @@ covered-call delta and a CSP delta that violate the model rules. The panel
 should reject the save with a Pydantic error rather than writing bad data.
 If it writes anyway, stop and fix that before proceeding.
 
+### Derivatives archive (Coinalyze)
+
+The archive only stays complete if it runs at least every 12 hours: Coinalyze
+deletes intraday data older than ~25 h. Run it in a terminal that stays open
+(or under tmux), every 6 hours:
+
+```bash
+export DATABASE_URL=postgresql+psycopg://trading@127.0.0.1:5433/trading
+uv run python -m data.ingest.coinalyze run --every-hours 6
+```
+
+Check it with `uv run python -m data.ingest.coinalyze report --hours 48`; exit code
+0 means no gaps and no lag. Holes "ausentes en la fuente" are minutes Coinalyze
+itself does not have (Kraken Futures has a few a day); they are reported, not
+filled.
+
 ---
 
 ## 5. Phase 1 — Backtesting
