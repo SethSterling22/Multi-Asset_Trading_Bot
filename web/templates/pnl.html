@@ -1,0 +1,28 @@
+<div class="card">
+  <h2>P&amp;L por estrategia · desde el inicio</h2>
+  <p class="hint">neto = bruto − comisiones + funding − slippage; el bruto va a precios de decisión
+    (D-004). Mismo cálculo que <span class="mono">core/ledger/attribution.py</span>.</p>
+  <table>
+    <thead><tr><th>Sleeve</th><th>Bruto</th><th>Comisiones</th><th>Funding</th><th>Slippage</th>
+      <th>Neto</th><th>Coste IA</th><th>Neto tras IA</th><th>Hoy</th><th>Fills</th><th>N backtest</th></tr></thead>
+    <tbody>{% for r in v.rows %}
+      <tr><td><span class="sname"><i style="background:var(--s{{ loop.index }})"></i>{{ r.name }}</span></td>
+        <td>{{ r.gross | money }}</td><td>{{ r.fees | money }}</td>
+        <td class="{{ r.funding | cls }}">{{ r.funding | money }}</td><td>{{ r.slippage | money }}</td>
+        <td class="{{ r.net | cls }}">{{ r.net | money }}</td><td>{{ r.ai_cost | money }}</td>
+        <td class="{{ r.net_after_ai | cls }}"><b>{{ r.net_after_ai | money }}</b></td>
+        <td class="{{ r.today_net | cls }}">{{ r.today_net | money }}</td>
+        <td>{{ r.n_fills }}</td><td>{{ r.n_registered or "—" }}</td></tr>
+    {% endfor %}</tbody>
+    <tfoot><tr><td>Total</td><td>{{ v.total.gross | money }}</td><td>{{ v.total.fees | money }}</td>
+      <td>{{ v.total.funding | money }}</td><td>{{ v.total.slippage | money }}</td>
+      <td>{{ v.total.net | money }}</td><td>{{ v.total.ai_cost | money }}</td>
+      <td>{{ v.total.net_after_ai | money }}</td><td>{{ v.total.today_net | money }}</td>
+      <td>{{ v.total.n_fills }}</td><td></td></tr></tfoot>
+  </table>
+</div>
+<div class="card">
+  <h2>De bruto a neto · total</h2>
+  <p class="hint">Dónde se va el edge: comisiones, funding, slippage y coste de IA.</p>
+  {{ v.waterfall_svg | safe }}
+</div>

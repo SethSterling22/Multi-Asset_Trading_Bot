@@ -442,3 +442,40 @@ informe; aquí queda el resumen y la sección donde se justifica cada una.
     aparece al añadir otra VM.
 - **Rendimiento:** la diferencia real con una VM es memoria reservada (no se apartan
   ~12 GB), no CPU: la carga es mínima (el archivador trabaja ~75 s cada 6 h).
+
+---
+
+## 2026-11-02 · D-013 · Dashboard FastAPI + HTMX adelantado (Fase 2.8 / Sesión 7), solo lectura
+
+- **Contexto:** el usuario quiere ver gráficamente lo que pasa en Sadida y prefiere ir
+  directamente al dashboard propio, basado en `docs/dashboard_mockup.html`, en vez de un
+  Grafana intermedio. Es un **adelanto de fase** sobre CLAUDE.md §4 (el gate de la Fase 0
+  aún no está cerrado: falta el archivador 48 h y el snapshot del exchange de la 0.1).
+- **Por qué se acepta:** el dashboard es de **solo lectura** (no hay ningún POST, y la
+  conexión a Postgres lleva `default_transaction_read_only=on` impuesto por el
+  servidor). No cambia el riesgo de nada: el orden de fases protege contra construir
+  sobre algo sin verificar, y aquí lo que se construye solo mira.
+- **Decisiones:**
+  1. Vistas 1 (Live), 2 (P&L por estrategia, con el waterfall), 5 (Salud) y 6 (Riesgo)
+     de la §8.2, más **Mercado** (el archivo de Coinalyze, el único dato vivo hoy). Las
+     vistas 3 y 4 dependen de la Fase 3 y no se construyen.
+  2. **Gráficos en SVG generado en el servidor**, con el CSS del mockup copiado tal cual.
+     Ni uPlot ni build step: el navegador solo carga HTMX (CDN, versión fijada) para
+     refrescar cabecera y vista cada 30 s.
+  3. **Polling de HTMX en lugar de SSE** (la §8.1 dice SSE). Para refrescar cada 30 s
+     es más simple y sobrevive a reiniciar el backend sin lógica de reconexión; el gate
+     de la Sesión 7 sobre SSE se reformula como "la vista se recupera tras reiniciar el
+     contenedor", que con polling es automático.
+  4. **Todo cálculo reutiliza el código probado:** el P&L sale de
+     `core/ledger/attribution.py`, la cobertura del archivador y el kill switch de
+     `risk/breakers.py`. Sin Sharpe (D-008).
+  5. Contenedor propio (`docker/Dockerfile.api`) **sin las claves de brokers ni de
+     Coinalyze**. Escucha en `127.0.0.1` del host por defecto; se publica en la tailnet
+     con `tailscale serve` o poniendo la IP de Tailscale en `DASHBOARD_BIND`.
+  6. Sin login propio: el acceso lo da la tailnet (§8.1, "Traefik ForwardAuth +
+     Tailscale"; aquí, de momento, solo Tailscale).
+- **Gate de la Sesión 7 que sí aplica:** el P&L por estrategia cuadra al centavo contra el
+  ledger (`tests/api/test_dashboard_db.py::test_pnl_matches_the_ledger_to_the_cent`) y
+  ninguna cifra de retorno mostrada es bruta.
+- Con esto, `config.json` del host se monta en el Wheel y en el dashboard: editarlo en
+  Sadida surte efecto sin reconstruir la imagen.

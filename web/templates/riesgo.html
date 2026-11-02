@@ -1,0 +1,25 @@
+<div class="card">
+  <h2>Posiciones abiertas</h2>
+  <p class="hint">Vista <span class="mono">positions</span>, derivada de los fills (CLAUDE.md §1.3).</p>
+  {% if v.positions %}
+  <table>
+    <thead><tr><th>Sleeve</th><th>Venue</th><th>Símbolo</th><th>Tipo</th><th>Cantidad</th>
+      <th>Caja neta invertida</th><th>Comisiones</th><th>Funding</th><th>Último fill</th></tr></thead>
+    <tbody>{% for k, p in v.positions.items() %}
+      <tr><td>{{ k.strategy_id }}</td><td>{{ k.venue }}</td><td class="mono">{{ k.symbol }}</td>
+        <td>{{ k.asset_type.value }}</td><td class="{{ p.net_qty | cls }}">{{ p.net_qty | dec }}</td>
+        <td>{{ p.net_cost | money }}</td><td>{{ p.total_commission | money }}</td>
+        <td>{{ p.total_funding | money }}</td>
+        <td class="mono">{{ p.last_fill_ts.strftime("%Y-%m-%d %H:%M") }}</td></tr>
+    {% endfor %}</tbody>
+  </table>
+  {% else %}<p class="empty">Sin posiciones abiertas en el ledger.</p>{% endif %}
+</div>
+<div class="card">
+  <h2>Risk floor vigente</h2>
+  <p class="hint">Constantes de <span class="mono">core/risk_floor.py</span>: no son configurables.</p>
+  <table><tbody>{% for label, value in v.limits %}
+    <tr><td>{{ label }}</td><td class="mono">{{ value }}</td></tr>{% endfor %}</tbody></table>
+  <p class="note">Exposición por símbolo, distancia a liquidación y correlación rodante necesitan
+    precios de mercado del venue: llegan con los brokers de la Fase 2.</p>
+</div>

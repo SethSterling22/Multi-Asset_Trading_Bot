@@ -1,0 +1,25 @@
+<div class="card">
+  <h2>Derivados · BTC y ETH por venue</h2>
+  <p class="hint">Archivo de Coinalyze: contexto de mercado, no el funding que cobraría un sleeve
+    (no cubre los perps de EE.UU. de Coinbase, D-009). Funding en % por período del venue.</p>
+  <table>
+    <thead><tr><th>Activo · venue</th><th>Open interest</th><th>OI 24 h</th><th>Funding</th>
+      <th>Liq. largos 24 h</th><th>Liq. cortos 24 h</th></tr></thead>
+    <tbody>{% for r in v.venues %}
+      <tr><td><span class="sname">{{ r.asset }} · {{ r.exchange }}</span></td>
+        <td>{{ r.oi_usd | compact }}</td><td class="{{ r.oi_change_24h | cls }}">{{ r.oi_change_24h | pct }}</td>
+        <td class="mono">{% if r.funding_pct is not none %}{{ "%+.4f" | format(r.funding_pct) }}%{% else %}—{% endif %}</td>
+        <td>{{ r.liq_long_24h | compact }}</td><td>{{ r.liq_short_24h | compact }}</td></tr>
+    {% endfor %}</tbody>
+  </table>
+</div>
+<div class="grid2">
+  <div class="card"><h2>Open interest BTC · 24 h</h2><p class="hint">Base 100 al inicio de la ventana.</p>
+    {{ v.oi_BTC_legend | safe }}{{ v.oi_BTC | safe }}</div>
+  <div class="card"><h2>Open interest ETH · 24 h</h2><p class="hint">Base 100 al inicio de la ventana.</p>
+    {{ v.oi_ETH_legend | safe }}{{ v.oi_ETH | safe }}</div>
+  <div class="card"><h2>Funding BTC · 7 días</h2><p class="hint">Cierre horario, %.</p>
+    {{ v.fr_BTC_legend | safe }}{{ v.fr_BTC | safe }}</div>
+  <div class="card"><h2>Funding ETH · 7 días</h2><p class="hint">Cierre horario, %.</p>
+    {{ v.fr_ETH_legend | safe }}{{ v.fr_ETH | safe }}</div>
+</div>

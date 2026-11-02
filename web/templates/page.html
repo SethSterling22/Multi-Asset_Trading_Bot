@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Multi-Asset Trading Bot · {{ current }}</title>
+<link rel="stylesheet" href="/static/style.css?v={{ css_version }}">
+<script src="https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js" defer></script>
+</head>
+<body>
+<div class="wrap">
+  <div id="hdr" hx-get="/partials/header" hx-trigger="every {{ refresh }}s" hx-swap="innerHTML">
+    {% include "header.html" %}
+  </div>
+  <nav class="tabs">
+    {% for name, path, label in views %}
+      <a href="{{ path }}" {% if name == current %}aria-current="page"{% endif %}>{{ label }}</a>
+    {% endfor %}
+  </nav>
+  <section id="view" hx-get="/partials/{{ current }}" hx-trigger="every {{ refresh }}s"
+           hx-swap="innerHTML">
+    {% include view_template %}
+  </section>
+  <footer>
+    Solo lectura sobre el ledger · se refresca cada {{ refresh }} s · toda cifra de P&amp;L es neta
+    de comisiones, funding, slippage y coste de IA · sin Sharpe: sin deflactar por N no contiene
+    información (CLAUDE.md §1.11).
+  </footer>
+</div>
+</body>
+</html>

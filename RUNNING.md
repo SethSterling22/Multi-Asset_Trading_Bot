@@ -248,11 +248,24 @@ All commands run on Sadida, as root.
    git clone https://github.com/SethSterling22/Multi-Asset_Trading_Bot.git /opt/trading
    cd /opt/trading
    install -d -m 700 /etc/trading
-   openssl rand -hex 24 > /etc/trading/pg_password && chmod 600 /etc/trading/pg_password
+   openssl rand -hex 24 > /etc/trading/pg_password && chmod 444 /etc/trading/pg_password
    install -m 600 docker/trading.env.example /etc/trading/env
    nano /etc/trading/env        # PAPER Alpaca keys and the Coinalyze key
    install -m 644 docker/compose.env.example /etc/trading/compose.env
    install -d -m 700 /mnt/data/trading
+   # Postgres runs as uid 1000 inside its image; it must own its data directory.
+   install -d -o 1000 -g 1000 -m 700 /mnt/data/trading/postgres
+   ```
+   `pg_password` is world-readable on purpose, inside a `700` directory. Outside
+   Swarm, a compose secret is a bind mount that keeps the host file's permissions,
+   and neither Postgres (uid 1000) nor the app (uid 10001) runs as root; the
+   directory is what keeps other host users out. Postgres failing with
+   `/run/secrets/pg_password: Permission denied` means this step was missed.
+   After fixing it, recreate the container: one left `unhealthy` by earlier failed
+   starts makes `up -d` fail immediately, before checking again.
+   ```bash
+   docker compose -f docker/compose.runtime.yml --env-file /etc/trading/compose.env \
+     up -d --force-recreate --wait postgres
    ```
 2. Build and start everything (migrations run first, on their own):
    ```bash
@@ -277,6 +290,19 @@ All commands run on Sadida, as root.
    yourself** with `rm /run/trading/HALT`. A host reboot clears it, because `/run` is
    tmpfs.
 
+### The dashboard
+
+It listens on Sadida's `127.0.0.1:8000`. Publish it on your tailnet with HTTPS:
+
+```bash
+tailscale serve --bg 8000
+```
+
+Then open `https://<sadida>.<tailnet>.ts.net` from any device on the tailnet. To
+listen directly on Sadida's Tailscale IP instead, set `DASHBOARD_BIND=100.x.y.z` in
+`/etc/trading/compose.env` and recreate the container. The dashboard is read-only
+and has no broker keys; the tailnet is its only access control (D-013).
+
 Day to day (`C="docker compose -f docker/compose.runtime.yml --env-file /etc/trading/compose.env"`):
 
 ```bash
@@ -285,6 +311,8 @@ $C logs --tail 20 archiver            # last archiver runs
 $C run --rm --no-deps archiver python -m data.ingest.coinalyze report --hours 48
 touch /run/trading/HALT               # kill switch: no new orders
 git pull && $C up -d --build          # deploy a new version
+$C logs --tail 20 dashboard           # the dashboard
+nano config.json                      # takes effect in the Wheel without rebuilding
 ```
 
 `run --rm --no-deps` (not `exec`) goes through the entrypoint, which is what sets

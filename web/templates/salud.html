@@ -1,0 +1,24 @@
+<div class="card">
+  <h2>Kill switch</h2>
+  {% if v.kill_switch.active %}
+    <p class="down">ACTIVO: no se abren posiciones nuevas.</p>
+    <ul class="reasons">{% for r in v.kill_switch.reasons %}<li>{{ r }}</li>{% endfor %}</ul>
+  {% else %}
+    <p class="up">Inactivo en las cuatro fuentes (risk_events, Redis, /run/trading/HALT, config.json).</p>
+  {% endif %}
+</div>
+<div class="card">
+  <h2>Archivo de Coinalyze · últimas 24 h</h2>
+  <p class="hint">Sin cubrir = tiempo perdido. Retraso &gt; 12 h = el archivador está parado (Coinalyze
+    conserva ~25 h a 1 minuto). Ausentes en la fuente = barras que Coinalyze no tiene; informativo.</p>
+  <table>
+    <thead><tr><th>Métrica</th><th>Intervalo</th><th>Series</th><th>Retraso máx.</th>
+      <th>Series sin cubrir</th><th>Ausentes en la fuente</th></tr></thead>
+    <tbody>{% for g in v.archive %}
+      <tr><td>{{ g.metric }}</td><td class="mono">{{ g.interval }}</td><td>{{ g.n_series }}</td>
+        <td class="{% if g.max_lag and g.max_lag.total_seconds() > 43200 %}down{% endif %}">{{ g.max_lag | ago }}</td>
+        <td class="{% if g.uncovered %}down{% else %}up{% endif %}">{{ g.uncovered }}</td>
+        <td>{{ g.source_holes }}</td></tr>
+    {% endfor %}</tbody>
+  </table>
+</div>

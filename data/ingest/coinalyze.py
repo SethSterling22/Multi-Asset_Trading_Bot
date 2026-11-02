@@ -134,6 +134,20 @@ _LAST = text("""
 """)
 
 
+_FIRST = text("""
+    SELECT min(covered_from) FROM ingest_runs
+    WHERE source = :source AND symbol = :symbol AND metric = :metric AND interval = :interval
+""")
+
+
+def first_covered(conn: Connection, s: Series) -> datetime | None:
+    """Inicio del archivo de la serie: lo anterior no existía y no puede ser un hueco."""
+    value: datetime | None = conn.execute(_FIRST, {
+        "source": SOURCE, "symbol": s.symbol, "metric": s.metric, "interval": s.interval,
+    }).scalar_one()
+    return value
+
+
 def last_covered(conn: Connection, s: Series) -> datetime | None:
     value: datetime | None = conn.execute(_LAST, {
         "source": SOURCE, "symbol": s.symbol, "metric": s.metric, "interval": s.interval,
@@ -287,12 +301,16 @@ def report(engine: Engine, hours: float, max_lag_hours: float,
             if s.interval == "daily":
                 continue
             last = last_covered(conn, s)
-            if last is None:
+            first = first_covered(conn, s)
+            if last is None or first is None:
                 problems += 1
                 print(f"SIN DATOS {s.symbol} {s.metric}/{s.interval}")
                 continue
-            gaps = coverage_gaps(conn, s, since, last)
-            holes = sequence_holes(conn, s, since, last) if s.metric in DENSE_METRICS else []
+            # Antes de la primera ejecución el archivo no existía: no es un hueco.
+            start = max(since, first)
+            gaps = coverage_gaps(conn, s, start, last)
+            holes = (sequence_holes(conn, s, start, last)
+                     if s.metric in DENSE_METRICS else [])
             lag = now - last
             label = f"{s.symbol} {s.metric}/{s.interval}"
             if gaps:
@@ -306,7 +324,8 @@ def report(engine: Engine, hours: float, max_lag_hours: float,
                 print(f"ausentes en la fuente {label}: {len(holes)} barras,"
                       f" p.ej. {[h.isoformat() for h in holes[:3]]}")
     print(f"{len(series)} series · {problems} problemas en las últimas {hours:g} h"
-          f" (retraso máximo {max_lag_hours:g} h)")
+          f" (desde la primera ejecución de cada serie, si es posterior;"
+          f" retraso máximo {max_lag_hours:g} h)")
     return problems
 
 
