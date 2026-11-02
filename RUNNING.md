@@ -248,12 +248,19 @@ All commands run on Sadida, as root.
    git clone https://github.com/SethSterling22/Multi-Asset_Trading_Bot.git /opt/trading
    cd /opt/trading
    install -d -m 700 /etc/trading
-   openssl rand -hex 24 > /etc/trading/pg_password && chmod 600 /etc/trading/pg_password
+   openssl rand -hex 24 > /etc/trading/pg_password && chmod 444 /etc/trading/pg_password
    install -m 600 docker/trading.env.example /etc/trading/env
    nano /etc/trading/env        # PAPER Alpaca keys and the Coinalyze key
    install -m 644 docker/compose.env.example /etc/trading/compose.env
    install -d -m 700 /mnt/data/trading
+   # Postgres runs as uid 1000 inside its image; it must own its data directory.
+   install -d -o 1000 -g 1000 -m 700 /mnt/data/trading/postgres
    ```
+   `pg_password` is world-readable on purpose, inside a `700` directory. Outside
+   Swarm, a compose secret is a bind mount that keeps the host file's permissions,
+   and neither Postgres (uid 1000) nor the app (uid 10001) runs as root; the
+   directory is what keeps other host users out. Postgres failing with
+   `/run/secrets/pg_password: Permission denied` means this step was missed.
 2. Build and start everything (migrations run first, on their own):
    ```bash
    docker compose -f docker/compose.runtime.yml --env-file /etc/trading/compose.env up -d --build

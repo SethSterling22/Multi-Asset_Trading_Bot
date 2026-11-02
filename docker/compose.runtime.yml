@@ -4,9 +4,15 @@
 #   sudo docker compose -f docker/compose.runtime.yml --env-file /etc/trading/compose.env up -d --build
 #
 # Secretos (interino hasta SOPS + age, Fase 1.2), fuera del repo y de la imagen:
-#   /etc/trading/pg_password   contraseña de Postgres                 (root, 0600)
-#   /etc/trading/env           claves de PAPER de Alpaca y Coinalyze  (root, 0600)
+#   /etc/trading/              el directorio                           (root, 0700)
+#   /etc/trading/pg_password   contraseña de Postgres                  (root, 0444)
+#   /etc/trading/env           claves de PAPER de Alpaca y Coinalyze   (root, 0600)
 #   /etc/trading/compose.env   TRADING_DATA_DIR=/mnt/data/trading
+#
+# pg_password tiene que ser legible: fuera de Swarm, un secreto de compose es un
+# montaje del fichero del host con SUS permisos, y Postgres (uid 1000) y la app (uid
+# 10001) no son root. Lo protege el directorio en 0700: en el host nadie salvo root
+# llega a él. `env` sí se queda en 0600: lo lee compose en el host, como root.
 #
 # Kill switch: /run/trading del host está montado en el Wheel (solo lectura).
 #   sudo mkdir -p /run/trading && sudo touch /run/trading/HALT     # para todo
