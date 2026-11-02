@@ -183,6 +183,21 @@ class ParamsLoader:
         return self._config
 
 
+class ParamsSource(Protocol):
+    def current(self) -> TradingConfig | Rejected: ...
+
+
+class StaticParams:
+    """Parámetros fijos y ya validados: para el backtest, que barre configuraciones."""
+
+    def __init__(self, config: TradingConfig) -> None:
+        # Se revalida: un model_copy(update=...) no pasa por los validadores.
+        self._config = TradingConfig.model_validate(config.model_dump())
+
+    def current(self) -> TradingConfig:
+        return self._config
+
+
 # ---------------------------------------------------------------------------
 # Ledger y equity de referencia para los límites de pérdida
 # ---------------------------------------------------------------------------
@@ -265,7 +280,7 @@ class StrategyBase:
     def setup_base(
         self,
         *,
-        params: ParamsLoader,
+        params: ParamsSource,
         kill_switch: KillSwitch,
         ledger: LedgerSink,
         loss_reference: LossReference,
@@ -359,7 +374,7 @@ class StrategyBase:
         return ALLOWED
 
 
-def config_kill_source(params: ParamsLoader) -> Callable[[str], bool]:
+def config_kill_source(params: ParamsSource) -> Callable[[str], bool]:
     """El flag `emergency_kill_switch` de config.json, como fuente EXTRA del kill switch.
 
     Config inválida o ilegible cuenta como activo (fail-closed).
