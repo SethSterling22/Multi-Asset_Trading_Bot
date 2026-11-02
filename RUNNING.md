@@ -20,13 +20,14 @@ deployment, know exactly what is implemented and what still needs to be built.
 | Component | Status |
 |---|---|
 | `core/config/models.py` — validation and atomic persistence | Works; bounds import the risk floor |
-| `strategies/crypto_rebalance/` — rebalancing logic + `PaperSpotBroker` | Simulated broker only; shared guards applied |
+| `strategies/crypto_rebalance/` — rebalancing logic + live runner (`live.py`) | Runs against **Alpaca paper** through the order router; dry-run by default (D-014). Tested against a fake venue; **has not yet sent an order to Alpaca** |
 | `app_dashboard.py` — Streamlit panel | Reads CSVs that nothing writes; retired in Session 7 |
 | `strategies/wheel/` — Wheel cycle and Lumibot adapter | Logic tested behind a fake broker; **the adapter has never run against Alpaca** |
 | Delta (`core/greeks.py`) | Broker greeks → Black-Scholes with IV → skip and log. Never guessed |
 | Ledger (`fills`, `orders`, `equity_curve`) | Done (Phase 0.1); the Wheel writes fills and equity |
 | Kill switch + breakers + pre-trade checks (`risk/`) | Done (Phase 0.5); 100% branch coverage |
-| Live broker adapters (Alpaca Crypto / Coinbase Advanced / perps) | **Not implemented** |
+| Order router + reconciliation (`execution/`) | Write-ahead intent, never resends on timeout, startup and per-cycle reconciliation that halts on mismatch. Tested with injected faults |
+| Broker adapters | Alpaca Crypto paper (`brokers/alpaca_crypto.py`). Coinbase Advanced and perps: **not implemented** |
 | Hedged spread strategy module | **Not implemented** (parameters exist in config) |
 | LLM routing / analysis agents | **Not implemented** (Phase 3) |
 
@@ -40,9 +41,11 @@ delta). See README "Known gaps" for the list and what is still open.
 1. Run the Wheel's Lumibot adapter in **paper** and check that fills reach the
    ledger and that `equity_curve` gets a snapshot every iteration. It has never
    run against a broker.
-2. Replace market orders with limit orders and add the write-ahead order intent
-   (Session 5, execution).
-3. Implement a real `SpotBroker` adapter if you intend to trade crypto.
+2. Replace the Wheel's market orders with limit orders and move it onto the order
+   router (the crypto sleeve already uses it).
+3. Run the crypto sleeve in paper (§4b) and check that its reconciliation stays
+   clean. Real crypto money also needs the venue and eligibility checks of
+   informe §13 (deferred to Phase 5, D-014).
 
 Everything below assumes these are addressed before Phase 3.
 
@@ -272,13 +275,14 @@ All commands run on Sadida, as root.
    docker compose -f docker/compose.runtime.yml --env-file /etc/trading/compose.env up -d --build
    docker compose -f docker/compose.runtime.yml --env-file /etc/trading/compose.env ps
    ```
-3. Limit the battery charge if the firmware allows it (a lithium battery at 100% day
+3. *(Optional; Sadida has a battery backup, so steps 3–4 can be skipped, D-014.)*
+   Limit the battery charge if the firmware allows it (a lithium battery at 100% day
    and night swells):
    ```bash
    ls /sys/class/power_supply/AP21A7T/charge_control_end_threshold && \
      echo 80 > /sys/class/power_supply/AP21A7T/charge_control_end_threshold
    ```
-4. Install the battery watcher (laptop battery as UPS):
+4. *(Optional.)* Install the battery watcher (laptop battery as UPS):
    ```bash
    install -m 755 ops/power/battery-watch.sh /usr/local/sbin/trading-battery-watch
    install -m 644 ops/power/trading-battery-watch.service /etc/systemd/system/
@@ -289,6 +293,38 @@ All commands run on Sadida, as root.
    25% it stops the containers cleanly. When power returns, **lift the kill switch
    yourself** with `rm /run/trading/HALT`. A host reboot clears it, because `/run` is
    tmpfs.
+
+### The crypto sleeve (Alpaca paper)
+
+It rebalances BTC and ETH every hour (`config.json`, `crypto_parameters`) inside its
+own budget, through the order router: pre-trade checks, kill switch, write-ahead
+intent, and a reconciliation against Alpaca before every cycle. Any mismatch
+between the ledger and Alpaca sets the kill switch for `crypto_rebalance` and the
+sleeve stops until you look at it.
+
+1. Preferably create a **second Alpaca paper account** for it: the first one's cash
+   is the Wheel's. In `/etc/trading/env` set `ALPACA_CRYPTO_API_KEY`,
+   `ALPACA_CRYPTO_API_SECRET` and `CRYPTO_BUDGET_USD` (see
+   `docker/trading.env.example`). Leave `CRYPTO_DRY_RUN=true` for now.
+2. Start it in dry-run. It plans and logs, sends nothing:
+   ```bash
+   C="docker compose -f docker/compose.runtime.yml --env-file /etc/trading/compose.env"
+   $C --profile crypto up -d --build crypto
+   $C logs -f crypto              # look for order_dry_run lines and cycle_done
+   ```
+3. When the dry-run plans look right, set `CRYPTO_DRY_RUN=false` in `/etc/trading/env`
+   and recreate it with `$C --profile crypto up -d crypto`. From then on it sends paper
+   orders.
+
+After a mismatch, check what did not match, fix the cause, and only then lift the
+kill switch (`risk_events` is append-only: lifting it is a new row, not a delete):
+```bash
+$C exec postgres psql -U trading -d trading -c \
+  "SELECT ts, detail FROM reconciliation_runs ORDER BY ts DESC LIMIT 3"
+$C exec postgres psql -U trading -d trading -c \
+  "INSERT INTO risk_events (kind, scope, reason, actor)
+   VALUES ('kill_switch_off', 'crypto_rebalance', 'mismatch revisado: <qué era>', 'seth')"
+```
 
 ### The dashboard
 
@@ -307,6 +343,7 @@ Day to day (`C="docker compose -f docker/compose.runtime.yml --env-file /etc/tra
 
 ```bash
 $C logs -f wheel                      # the Wheel
+$C --profile crypto logs -f crypto     # the crypto sleeve
 $C logs --tail 20 archiver            # last archiver runs
 $C run --rm --no-deps archiver python -m data.ingest.coinalyze report --hours 48
 touch /run/trading/HALT               # kill switch: no new orders

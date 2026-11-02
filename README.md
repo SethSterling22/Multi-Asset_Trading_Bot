@@ -21,7 +21,7 @@ live capital** (see [Known gaps](#known-gaps-in-the-legacy-code)).
 | Sleeve | Asset | Direction | State |
 |---|---|---|---|
 | `wheel` | Equities + options (Alpaca) | Premium selling | Legacy scaffold; real delta pending |
-| `crypto_rebalance` | Spot crypto | Long/flat | Legacy scaffold; simulated broker only |
+| `crypto_rebalance` | Spot crypto | Long/flat | Alpaca paper through the order router, dry-run by default (D-014) |
 | `funding_carry` | CFTC-regulated perps (Coinbase/Kraken) | Delta-neutral | To build (Phase 2) |
 | `xsec_momentum` | BTC/ETH perps + alt spot | Long/short on majors only; alts long/flat | To build (Phase 2) |
 | `trend` | BTC/ETH perps | Long/short | To build (Phase 2) |
