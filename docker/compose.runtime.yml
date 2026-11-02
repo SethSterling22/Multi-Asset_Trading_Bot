@@ -1,0 +1,53 @@
+# Postgres + TimescaleDB y Redis para EJECUTAR el proyecto en una máquina propia
+# (Sadida, DECISIONS.md D-011). Interino hasta el compose completo de la Fase 1.
+#
+#   sudo install -d -m 700 /etc/trading
+#   openssl rand -hex 24 | sudo tee /etc/trading/pg_password >/dev/null
+#   sudo chmod 600 /etc/trading/pg_password
+#   TRADING_DATA_DIR=/srv/trading docker compose -f docker/compose.runtime.yml up -d
+#
+# Diferencias con compose.dev.yml: contraseña leída de un fichero (no trust), Redis
+# con persistencia, datos en un directorio del host (TRADING_DATA_DIR) y reinicio
+# automático. Los dos puertos escuchan SOLO en 127.0.0.1: nada es alcanzable desde
+# la red; los procesos que los usan corren en la misma VM.
+name: trading
+
+services:
+  postgres:
+    image: timescale/timescaledb-ha:pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: trading
+      POSTGRES_DB: trading
+      POSTGRES_PASSWORD_FILE: /run/secrets/pg_password
+    secrets: [pg_password]
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - ${TRADING_DATA_DIR:?define TRADING_DATA_DIR}/postgres:/home/postgres/pgdata
+    shm_size: 1gb
+    # Al apagar, Postgres necesita tiempo para cerrar limpio (checkpoint).
+    stop_grace_period: 120s
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trading -d trading"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - ${TRADING_DATA_DIR:?define TRADING_DATA_DIR}/redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+
+secrets:
+  pg_password:
+    file: /etc/trading/pg_password

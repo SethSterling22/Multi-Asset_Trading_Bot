@@ -1,0 +1,17 @@
+# EN EL HOST DE PROXMOX (Sadida), no en la VM: la VM no ve la batería del portátil.
+#   install -m 755 ops/power/battery-watch.sh /usr/local/sbin/trading-battery-watch
+#   install -m 644 ops/power/trading-battery-watch.service /etc/systemd/system/
+#   echo 'VMID=<id de la VM>' > /etc/trading/battery-watch.conf
+#   systemctl enable --now trading-battery-watch
+[Unit]
+Description=Trading · la batería del portátil como UPS de la VM de trading
+After=pve-guests.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/trading-battery-watch
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
