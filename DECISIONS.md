@@ -479,3 +479,48 @@ informe; aquí queda el resumen y la sección donde se justifica cada una.
   ninguna cifra de retorno mostrada es bruta.
 - Con esto, `config.json` del host se monta en el Wheel y en el dashboard: editarlo en
   Sadida surte efecto sin reconstruir la imagen.
+
+---
+
+## 2026-11-02 · D-014 · Sleeve cripto en Alpaca paper por el router; §13 legal diferido
+
+- **Contexto:** el usuario quiere avanzar con el cripto sin esperar a la parte de
+  credenciales y permisos legales, porque todo es paper y datos de prueba. Ya tiene la
+  API de Alpaca; la de Coinbase falta. Sadida tiene battery backup y es nodo central
+  del clúster, así que el vigilante de batería deja de ser necesario.
+- **Decisiones:**
+  1. **Primer venue cripto: Alpaca paper**, detrás del port `SpotVenue`
+     (`brokers/base.py`). Coinbase Advanced entra después con el mismo port. El
+     adaptador **se niega a construirse con `paper=False`**: dinero real es la Fase 5.
+  2. **Capa de ejecución (`execution/`)**, que es la Sesión 5 adelantada para este
+     sleeve: kill switch → pre-trade in-process → tasa de órdenes, horizonte mínimo y
+     turnover → INSERT `PENDING_NEW` + COMMIT → POST. Con timeout o 5xx se consulta por
+     `client_order_id` y **nunca se reenvía**; si tampoco se puede consultar, la orden
+     queda `UNKNOWN` y la reconciliación decide.
+  3. **Reintentos de alpaca-py desactivados** (reintenta 429/504 también en el POST de
+     una orden, que es reenviar a ciegas) y timeout de 10 s en cada petición. Se hace
+     sobre atributos privados de la versión fijada; un test falla si cambian.
+  4. **Reconciliación antes de cada ciclo**: órdenes abiertas y posiciones del ledger
+     contra el venue. Un mismatch activa el kill switch de `crypto_rebalance`
+     (`risk_events`, actor `reconciler`); nada se arregla solo. Venue sin responder:
+     el ciclo no opera, pero no activa el kill switch.
+  5. **`MIN_HOLD_SECONDS` y `MAX_ROUNDTRIPS_PER_YEAR` se aplican ya en el router**
+     (estaban en el floor y no los usaba nadie). Turnover = fills/2 en 365 días; un
+     sleeve sin presupuesto en el floor no opera.
+  6. **Presupuesto propio del sleeve** (`CRYPTO_BUDGET_USD`): su caja es el presupuesto
+     más el flujo de caja de sus fills, y las compras se topan además con la caja real
+     de la cuenta, compartida con la Wheel en paper. Recomendado: una segunda cuenta
+     paper. Las tenencias salen del ledger, no del venue (§1.3).
+  7. **Comisión de los fills cripto = 0, sin verificar.** Alpaca paper no deja claro si
+     cobra el fee cripto en paper. Si lo cobra en especie, la cantidad del venue no
+     cuadrará con la del ledger y la reconciliación lo dirá en el primer fill. Se
+     corrige entonces con el dato observado, no con una suposición.
+  8. **Dry-run por defecto.** Sin `CRYPTO_DRY_RUN=false` el proceso planifica y
+     registra, no envía. El servicio de compose va en el perfil `crypto`: no arranca
+     con un `up -d` normal.
+  9. **§13 del informe** (elegibilidad de Puerto Rico en cada venue, fiscalidad,
+     permisos) **se difiere a la Fase 5**, antes del primer dólar real. No afecta a
+     paper. Pasos 3–4 de RUNNING §4b (batería) pasan a opcionales.
+- **Límites conocidos:** los checks pre-trade ven solo este sleeve (la exposición
+  agregada entre sleeves llega con el segundo sleeve operando). El fill se registra
+  agregado por orden (`venue_fill_id` = id de la orden), no por ejecución parcial.

@@ -14,7 +14,7 @@
 # 10001) no son root. Lo protege el directorio en 0700: en el host nadie salvo root
 # llega a él. `env` sí se queda en 0600: lo lee compose en el host, como root.
 #
-# Kill switch: /run/trading del host está montado en el Wheel (solo lectura).
+# Kill switch: /run/trading del host está montado en el Wheel y en `crypto` (solo lectura).
 #   sudo mkdir -p /run/trading && sudo touch /run/trading/HALT     # para todo
 name: trading
 
@@ -108,6 +108,23 @@ services:
       - /run/trading:/run/trading:ro    # fuente "fichero" del kill switch
       # config.json del host: editarlo en Sadida surte efecto sin reconstruir la imagen
       # (el Wheel lo recarga por mtime).
+      - ../config.json:/app/config.json:ro
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+
+  # Rebalanceador cripto contra Alpaca PAPER (D-014). Perfil `crypto`: no arranca con un
+  # `up -d` normal, hay que pedirlo con `--profile crypto`. Y aun así va en dry-run hasta
+  # que /etc/trading/env diga CRYPTO_DRY_RUN=false.
+  crypto:
+    <<: *engine
+    command: ["python", "-m", "strategies.crypto_rebalance.live"]
+    profiles: [crypto]
+    restart: on-failure:5
+    stop_signal: SIGTERM
+    stop_grace_period: 45s
+    volumes:
+      - /run/trading:/run/trading:ro
       - ../config.json:/app/config.json:ro
     depends_on:
       migrate: { condition: service_completed_successfully }
