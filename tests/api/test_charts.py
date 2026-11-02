@@ -45,3 +45,18 @@ def test_waterfall_ends_on_the_net_figure() -> None:
     rects = root.findall("{http://www.w3.org/2000/svg}rect")
     assert len(rects) == len(steps)
     assert "$8.29" in svg and "$10.00" in svg
+
+
+def test_venue_colors_are_fixed_and_distinct() -> None:
+    from api.queries import VENUE_COLORS
+    assert len(set(VENUE_COLORS.values())) == len(VENUE_COLORS) == 5
+    a = line_chart({"okx": [(T, 1.0), (T + timedelta(1), 2.0)]}, colors=VENUE_COLORS)
+    b = line_chart({"binance": [(T, 1.0)], "okx": [(T, 1.0), (T + timedelta(1), 2.0)]},
+                   colors=VENUE_COLORS)
+    assert f'stroke="{VENUE_COLORS["okx"]}"' in a and f'stroke="{VENUE_COLORS["okx"]}"' in b
+
+
+def test_waterfall_uses_the_given_money_format() -> None:
+    from api.app import money
+    svg = waterfall([("Bruto", 10.0), ("Comisiones", -12.0), ("Neto", -2.0)], money=money)
+    assert "−$12.00" in svg and "$-" not in svg

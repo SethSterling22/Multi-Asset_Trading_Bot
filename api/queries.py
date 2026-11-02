@@ -273,7 +273,15 @@ def metric_series(conn: Connection, *, asset: str, metric: str, interval: str, s
         for k, pts in out.items():
             base = pts[0][1] if pts and pts[0][1] else None
             out[k] = [(t, v / base * 100) for t, v in pts] if base else pts
-    return dict(out)
+    return {k: out[k] for k in sorted(out)}            # orden estable en la leyenda
+
+
+# Un color fijo por venue, el mismo en todos los gráficos.
+VENUE_COLORS = {e: c for e, c in zip(
+    sorted({s.exchange for s in SERIES}),
+    ("#3987e5", "#d95926", "#199e70", "#c98500", "#d55181"),
+    strict=False,
+)}
 
 
 # ---------------------------------------------------------------------------

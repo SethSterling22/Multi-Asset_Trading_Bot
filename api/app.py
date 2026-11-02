@@ -10,6 +10,7 @@ en risk_events. Cada sección se refresca sola con HTMX cada 30 s.
 
 from __future__ import annotations
 
+import hashlib
 import os
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -80,6 +81,9 @@ def create_app(engine: Engine, *, redis_url: str | None,
     app = FastAPI(title="Multi-Asset Trading Bot", docs_url=None, redoc_url=None)
     app.mount("/static", StaticFiles(directory=WEB / "static"), name="static")
     templates = Jinja2Templates(directory=WEB / "templates")
+    # Versión del CSS por contenido: tras desplegar, el navegador no usa la copia vieja.
+    templates.env.globals["css_version"] = hashlib.sha256(
+        (WEB / "static" / "style.css").read_bytes()).hexdigest()[:12]
     templates.env.filters.update(money=money, compact=compact, pct=pct, cls=signed_class,
                                  ago=ago, dec=quantity)
 
@@ -110,7 +114,8 @@ def create_app(engine: Engine, *, redis_url: str | None,
                 rows = queries.pnl_by_strategy(conn, now.date())
                 total = queries.totals(rows)
                 return {"rows": rows, "total": total,
-                        "waterfall_svg": charts.waterfall(queries.waterfall_steps(total))}
+                        "waterfall_svg": charts.waterfall(queries.waterfall_steps(total),
+                                                          money=money)}
             if name == "mercado":
                 out: dict[str, Any] = {"venues": queries.market(conn)}
                 for asset in ("BTC", "ETH"):
@@ -120,10 +125,13 @@ def create_app(engine: Engine, *, redis_url: str | None,
                     fr = queries.metric_series(conn, asset=asset, metric="funding_rate",
                                                interval="1hour", since=now - timedelta(days=7),
                                                every_minutes=60)
-                    out[f"oi_{asset}"] = charts.line_chart(oi, y_format=lambda v: f"{v:.1f}")
-                    out[f"oi_{asset}_legend"] = charts.legend(list(oi))
-                    out[f"fr_{asset}"] = charts.line_chart(fr, y_format=lambda v: f"{v:.3f}%")
-                    out[f"fr_{asset}_legend"] = charts.legend(list(fr))
+                    colors = queries.VENUE_COLORS
+                    out[f"oi_{asset}"] = charts.line_chart(oi, y_format=lambda v: f"{v:.1f}",
+                                                           colors=colors)
+                    out[f"oi_{asset}_legend"] = charts.legend(list(oi), colors)
+                    out[f"fr_{asset}"] = charts.line_chart(fr, y_format=lambda v: f"{v:.3f}%",
+                                                           colors=colors)
+                    out[f"fr_{asset}_legend"] = charts.legend(list(fr), colors)
                 return out
             if name == "salud":
                 return {"archive": queries.archive_health(conn),

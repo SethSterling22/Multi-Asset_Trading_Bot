@@ -126,3 +126,5 @@ nav.tabs a:hover{color:var(--ink-2)}
 .empty{color:var(--ink-3);font-size:12.5px;padding:6px 0}
 .mono{font-family:var(--mono)}
 .reasons{font-family:var(--mono);font-size:11px;color:#ff8f8f;margin:8px 0 0;padding-left:16px}
+td{white-space:nowrap}             /* el signo no se separa de la cifra */
+.sname{white-space:normal}
