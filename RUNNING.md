@@ -290,6 +290,19 @@ All commands run on Sadida, as root.
    yourself** with `rm /run/trading/HALT`. A host reboot clears it, because `/run` is
    tmpfs.
 
+### The dashboard
+
+It listens on Sadida's `127.0.0.1:8000`. Publish it on your tailnet with HTTPS:
+
+```bash
+tailscale serve --bg 8000
+```
+
+Then open `https://<sadida>.<tailnet>.ts.net` from any device on the tailnet. To
+listen directly on Sadida's Tailscale IP instead, set `DASHBOARD_BIND=100.x.y.z` in
+`/etc/trading/compose.env` and recreate the container. The dashboard is read-only
+and has no broker keys; the tailnet is its only access control (D-013).
+
 Day to day (`C="docker compose -f docker/compose.runtime.yml --env-file /etc/trading/compose.env"`):
 
 ```bash
@@ -298,6 +311,8 @@ $C logs --tail 20 archiver            # last archiver runs
 $C run --rm --no-deps archiver python -m data.ingest.coinalyze report --hours 48
 touch /run/trading/HALT               # kill switch: no new orders
 git pull && $C up -d --build          # deploy a new version
+$C logs --tail 20 dashboard           # the dashboard
+nano config.json                      # takes effect in the Wheel without rebuilding
 ```
 
 `run --rm --no-deps` (not `exec`) goes through the entrypoint, which is what sets

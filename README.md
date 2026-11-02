@@ -43,7 +43,8 @@ live capital** (see [Known gaps](#known-gaps-in-the-legacy-code)).
 | `core/`, `risk/`, `strategies/` | In use: config, ledger, greeks, metrics, logging; pre-trade checks, breakers, kill switch, LLM action space; the strategies and their shared guards (`strategies/base.py`) |
 | `backtest/` | Backtest engine (runs the live strategy code), CSCV/PBO, the N registry and the report. Results in `docs/backtests/` |
 | `data/` | Coinalyze client and archiver: OI, funding, liquidations and long/short to `derivatives_metrics` |
-| `brokers/`, `execution/`, `llm/`, `api/`, `web/` | Rest of the target tree (informe §9.2), still empty |
+| `api/`, `web/` | Read-only dashboard (FastAPI + Jinja + HTMX, server-side SVG): Live, P&L per strategy, Market, Health, Risk |
+| `brokers/`, `execution/`, `llm/` | Rest of the target tree (informe §9.2), still empty |
 | `tests/guards/` | Guard tests that must never fail; required to merge |
 | `docker/compose.yml` | Homelab stack (Compose + Traefik), reference for Phase 1 |
 
