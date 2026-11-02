@@ -7,14 +7,22 @@ from decimal import Decimal as D
 
 import pytest
 
-from core.risk_floor import MAX_CONSECUTIVE_LOSSES, MAX_ORDERS_PER_DAY, MAX_ORDERS_PER_MINUTE
+from core.risk_floor import (
+    MAX_CONSECUTIVE_LOSSES,
+    MAX_ORDERS_PER_DAY,
+    MAX_ORDERS_PER_MINUTE,
+    MAX_ROUNDTRIPS_PER_YEAR,
+    MIN_HOLD_SECONDS,
+)
 from risk.breakers import (
     consecutive_losses,
     extreme_spread,
+    min_hold,
     order_rate,
     reconciliation_mismatch,
     rejections,
     stale_data,
+    turnover,
     venue_error_rate,
 )
 from tests.guards.helpers import NOW
@@ -79,3 +87,28 @@ def test_extreme_spread() -> None:
 def test_reconciliation_mismatch() -> None:
     assert reconciliation_mismatch(0).ok
     assert not reconciliation_mismatch(1).ok
+
+
+def test_min_hold_blocks_reversing_inside_the_window() -> None:
+    hold = MIN_HOLD_SECONDS * S
+    assert min_hold("sell", [], NOW).ok
+    v = min_hold("sell", [(NOW - hold + S, "buy")], NOW)
+    assert not v.ok and v.code == "min_hold"
+    assert min_hold("sell", [(NOW - hold, "buy")], NOW).ok          # justo en el límite
+    assert min_hold("buy", [(NOW - S, "buy")], NOW).ok              # añadir no es deshacer
+
+
+def test_turnover_budget_per_sleeve() -> None:
+    limit = MAX_ROUNDTRIPS_PER_YEAR["crypto_rebalance"]
+    day = timedelta(days=1)
+    under = [NOW - i * day for i in range(2 * limit - 1)]          # + la nueva = 2·limit fills
+    assert turnover("crypto_rebalance", under, NOW).ok
+    v = turnover("crypto_rebalance", [*under, NOW - S], NOW)
+    assert not v.ok and v.code == "turnover"
+    # Lo de hace más de un año no cuenta.
+    assert turnover("crypto_rebalance", [NOW - 400 * day] * 100, NOW).ok
+
+
+def test_turnover_fails_closed_for_an_unknown_sleeve() -> None:
+    v = turnover("sleeve_nuevo", [], NOW)
+    assert not v.ok and "MAX_ROUNDTRIPS_PER_YEAR" in v.detail

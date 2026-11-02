@@ -28,6 +28,8 @@ from core.risk_floor import (
     MAX_CONSECUTIVE_LOSSES,
     MAX_ORDERS_PER_DAY,
     MAX_ORDERS_PER_MINUTE,
+    MAX_ROUNDTRIPS_PER_YEAR,
+    MIN_HOLD_SECONDS,
     WEEKLY_LOSS_STOP_PCT,
 )
 from risk.verdict import ALLOWED, Rejected, Verdict
@@ -228,4 +230,34 @@ def reconciliation_mismatch(unexplained_mismatches: int) -> Verdict:
     """8. Cualquier mismatch de reconciliación sin explicar para el trading nuevo."""
     if unexplained_mismatches > 0:
         return Rejected("reconciliation", f"{unexplained_mismatches} mismatches sin explicar")
+    return ALLOWED
+
+
+# ---------------------------------------------------------------------------
+# Horizonte y turnover (risk floor, informe §2.2): no son de los 8 breakers del
+# §12.4, pero se aplican igual, sobre fills persistidos, en el router.
+# ---------------------------------------------------------------------------
+def min_hold(side: str, symbol_fills: Iterable[tuple[datetime, str]], now: datetime) -> Verdict:
+    """Nada de deshacer en menos de MIN_HOLD_SECONDS lo que se hizo en el mismo símbolo.
+
+    `symbol_fills` son (ts, side) de los fills del símbolo en este sleeve.
+    """
+    window = timedelta(seconds=MIN_HOLD_SECONDS)
+    recent = [t for t, s in symbol_fills if s != side and now - window < t <= now]
+    if recent:
+        return Rejected("min_hold", f"fill contrario hace {now - max(recent)} < {window}")
+    return ALLOWED
+
+
+def turnover(strategy_id: str, fill_times: Iterable[datetime], now: datetime) -> Verdict:
+    """Round-trips equivalentes en 365 días (dos fills = uno), contando el que se va a hacer.
+
+    Un sleeve sin presupuesto en el floor no opera: fail-closed.
+    """
+    limit = MAX_ROUNDTRIPS_PER_YEAR.get(strategy_id)
+    if limit is None:
+        return Rejected("turnover", f"{strategy_id} sin MAX_ROUNDTRIPS_PER_YEAR en el floor")
+    fills = sum(1 for t in fill_times if now - timedelta(days=365) < t <= now) + 1
+    if fills / 2 > limit:
+        return Rejected("turnover", f"{fills / 2:g} round-trips en 365 d > {limit}")
     return ALLOWED
