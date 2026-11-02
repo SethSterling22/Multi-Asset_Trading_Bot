@@ -20,8 +20,10 @@ Revises:
 Create Date: 2026-11-01
 """
 
+import time
 from collections.abc import Sequence
 
+import sqlalchemy as sa
 from alembic import op
 
 revision: str = "0001"
@@ -314,8 +316,44 @@ def upgrade() -> None:
             op.execute(statement)
 
 
+# Los jobs que crea esta migración (compresión, retención y refresco de agregados).
+POLICY_PROCS = (
+    "policy_compression", "policy_retention", "policy_refresh_continuous_aggregate",
+)
+JOBS_IDLE_TIMEOUT_SECONDS = 60
+
+
+def _stop_policy_jobs() -> None:
+    """Desprograma los jobs, espera a que ninguno esté en marcha y los borra.
+
+    Sin esto, un DROP que coincide con un job ejecutándose en segundo plano falla con
+    "tuple concurrently deleted" (1 de cada ~60 downgrades sobre una base recién
+    creada). Va en autocommit: el scheduler tiene que ver la desprogramación.
+    """
+    bind = op.get_bind()
+    ids = list(bind.execute(
+        sa.text("SELECT job_id FROM timescaledb_information.jobs WHERE proc_name = ANY(:p)"),
+        {"p": list(POLICY_PROCS)},
+    ).scalars())
+    for job_id in ids:
+        bind.execute(sa.text("SELECT alter_job(:id, scheduled => false)"), {"id": job_id})
+    deadline = time.monotonic() + JOBS_IDLE_TIMEOUT_SECONDS
+    running = sa.text(
+        "SELECT count(*) FROM timescaledb_information.job_stats"
+        " WHERE job_id = ANY(:ids) AND job_status = 'Running'"
+    )
+    while bind.execute(running, {"ids": ids}).scalar_one():
+        if time.monotonic() > deadline:
+            raise RuntimeError(f"los jobs {ids} siguen en marcha tras "
+                               f"{JOBS_IDLE_TIMEOUT_SECONDS} s; downgrade abortado")
+        time.sleep(0.2)
+    for job_id in ids:
+        bind.execute(sa.text("SELECT delete_job(:id)"), {"id": job_id})
+
+
 def downgrade() -> None:
     with op.get_context().autocommit_block():
+        _stop_policy_jobs()
         op.execute("DROP MATERIALIZED VIEW IF EXISTS ohlcv_1h")
         op.execute("DROP MATERIALIZED VIEW IF EXISTS ohlcv_1m")
     op.execute("""

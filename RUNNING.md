@@ -412,11 +412,16 @@ The fastest way to halt everything:
 **Dashboard → Parameters → Emergency kill switch → Save configuration**
 
 The engine picks up the change on its next iteration (within 15 minutes by
-default) and stops submitting orders. For an immediate stop, kill the process:
+default) and stops submitting orders. For an immediate stop, stop the process:
+Ctrl+C in its terminal, or from another one:
 
 ```bash
-pkill -f strategies.wheel
+pkill -f strategies.wheel        # SIGTERM: orderly stop, forced after 30 s
 ```
+
+Both end the process (`strategies/runtime.py`); a second signal forces it at
+once. Stopping the process does not close positions: the protective stops live
+on the exchange.
 
 Note that the kill switch stops *new* orders; it does not close existing
 positions. Closing them is a manual decision.
