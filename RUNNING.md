@@ -261,6 +261,12 @@ All commands run on Sadida, as root.
    and neither Postgres (uid 1000) nor the app (uid 10001) runs as root; the
    directory is what keeps other host users out. Postgres failing with
    `/run/secrets/pg_password: Permission denied` means this step was missed.
+   After fixing it, recreate the container: one left `unhealthy` by earlier failed
+   starts makes `up -d` fail immediately, before checking again.
+   ```bash
+   docker compose -f docker/compose.runtime.yml --env-file /etc/trading/compose.env \
+     up -d --force-recreate --wait postgres
+   ```
 2. Build and start everything (migrations run first, on their own):
    ```bash
    docker compose -f docker/compose.runtime.yml --env-file /etc/trading/compose.env up -d --build
