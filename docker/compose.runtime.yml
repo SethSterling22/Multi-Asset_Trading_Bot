@@ -18,12 +18,8 @@
 #   sudo mkdir -p /run/trading && sudo touch /run/trading/HALT     # para todo
 name: trading
 
-x-engine: &engine
-  build:
-    context: ..
-    dockerfile: docker/Dockerfile.engine
-  image: trading-engine:local
-  env_file: /etc/trading/env
+# Lo común a los procesos de la app: acceso a Postgres y Redis por la red interna.
+x-app-db: &app-db
   environment:
     # La contraseña se lee del secreto al arrancar; nunca va en un env_file.
     PG_PASSWORD_FILE: /run/secrets/pg_password
@@ -36,7 +32,16 @@ x-engine: &engine
     - >
       export DATABASE_URL="postgresql+psycopg://trading:$$(cat $$PG_PASSWORD_FILE)@postgres:5432/trading"
       REDIS_URL="redis://redis:6379/0"; exec "$$@"
-    - engine
+    - app
+
+# El motor: además, las claves de los brokers y de Coinalyze.
+x-engine: &engine
+  <<: *app-db
+  build:
+    context: ..
+    dockerfile: docker/Dockerfile.engine
+  image: trading-engine:local
+  env_file: /etc/trading/env
 
 services:
   postgres:
@@ -101,9 +106,31 @@ services:
     stop_grace_period: 45s
     volumes:
       - /run/trading:/run/trading:ro    # fuente "fichero" del kill switch
+      # config.json del host: editarlo en Sadida surte efecto sin reconstruir la imagen
+      # (el Wheel lo recarga por mtime).
+      - ../config.json:/app/config.json:ro
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
+
+  # Dashboard de solo lectura (D-013). SIN las claves de brokers ni de Coinalyze: solo
+  # necesita leer la base, y la conexión es read-only impuesta por el servidor.
+  dashboard:
+    <<: *app-db
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+    image: trading-dashboard:local
+    command: ["python", "-m", "api"]
+    restart: unless-stopped
+    ports:
+      # 127.0.0.1 + `tailscale serve`, o la IP de Tailscale del host (compose.env).
+      - "${DASHBOARD_BIND:-127.0.0.1}:8000:8000"
+    volumes:
+      - /run/trading:/run/trading:ro
+      - ../config.json:/app/config.json:ro
+    depends_on:
+      migrate: { condition: service_completed_successfully }
 
 networks:
   data:
