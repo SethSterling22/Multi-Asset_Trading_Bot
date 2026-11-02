@@ -189,3 +189,18 @@ def test_daily_oi_and_liquidations_are_requested_in_native_units() -> None:
     assert not in_usd("liquidations", "daily")
     assert in_usd("open_interest", "1min") and unit("open_interest", "1min") == "usd"
     assert in_usd("funding_rate", "daily") and unit("funding_rate", "daily") == "percent"
+
+
+def test_report_does_not_count_time_before_the_first_run(
+    db_engine: Engine, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Una serie que empezó a archivarse hace 2 h no tiene "48 h sin cubrir": antes de
+    # su primera ejecución no existía. Eso es lo que marcaba falsos huecos en Sadida.
+    from data.ingest.coinalyze import report
+    s = series()
+    now = int(datetime.now(UTC).timestamp())
+    clock = [now - now % 60]
+    archive(db_engine, FakeCoinalyze(clock), [s], clock=lambda: clock[0])  # type: ignore[arg-type]
+    assert report(db_engine, hours=48, max_lag_hours=12, series=[s]) == 0
+    out = capsys.readouterr().out
+    assert "SIN CUBRIR" not in out and "0 problemas" in out
