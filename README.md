@@ -9,8 +9,8 @@ to maximise any single strategy's Sharpe but to keep the strategies
 in [docs/INFORME_TALOS.md](docs/INFORME_TALOS.md). Session 0 (layout, tooling,
 CI, risk floor guard), Session 1 (Phase 0.1–0.2: ledger, metrics, structured
 logging) and Session 2 (Phase 0.3–0.6: real delta, shared guards, breakers,
-kill switch) are done. Session 3 is half done: the honest backtest is in; the
-data recorder waits on a Coinalyze API key (informe §13, point 9). The
+kill switch) are done. Session 3 is almost done: the honest backtest and the
+Coinalyze archiver are in; the recorder still needs 48 h of clean runs. The
 only runnable code is still the legacy scaffold below, and **it is not fit for
 live capital** (see [Known gaps](#known-gaps-in-the-legacy-code)).
 
@@ -42,7 +42,8 @@ live capital** (see [Known gaps](#known-gaps-in-the-legacy-code)).
 | [core/risk_floor.py](core/risk_floor.py) | Risk limits as **Python constants**, hash-verified. Never config |
 | `core/`, `risk/`, `strategies/` | In use: config, ledger, greeks, metrics, logging; pre-trade checks, breakers, kill switch, LLM action space; the strategies and their shared guards (`strategies/base.py`) |
 | `backtest/` | Backtest engine (runs the live strategy code), CSCV/PBO, the N registry and the report. Results in `docs/backtests/` |
-| `brokers/`, `data/`, `execution/`, `llm/`, `api/`, `web/` | Rest of the target tree (informe §9.2), still empty |
+| `data/` | Coinalyze client and archiver: OI, funding, liquidations and long/short to `derivatives_metrics` |
+| `brokers/`, `execution/`, `llm/`, `api/`, `web/` | Rest of the target tree (informe §9.2), still empty |
 | `tests/guards/` | Guard tests that must never fail; required to merge |
 | `docker/compose.yml` | Homelab stack (Compose + Traefik), reference for Phase 1 |
 
@@ -101,6 +102,18 @@ configuration tried is recorded in `search_log` (append-only), including
 discarded ones, and the report refuses to run without it. Fees and slippage
 have no defaults because they are assumptions about the venue. Daily candles
 come from Coinbase's public API (no key) and are cached in `.cache/`.
+
+### Derivatives data archive (Coinalyze)
+
+```bash
+uv run python -m data.ingest.coinalyze run              # one run, ~75 s
+uv run python -m data.ingest.coinalyze report --hours 48
+```
+
+Needs `COINALYZE_API_KEY` in `.env` and `DATABASE_URL`. Coinalyze keeps only
+~1,500 intraday points (about 25 h at 1 minute), so a run at least every 12 h is
+what keeps the archive complete; `report` fails if the last run is older than
+that. It does not cover Coinbase's US perps (DECISIONS.md D-009).
 
 ### Running the strategies (paper only)
 
