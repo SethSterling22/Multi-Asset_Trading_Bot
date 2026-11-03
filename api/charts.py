@@ -141,7 +141,7 @@ def bars(steps: Sequence[tuple[str, float]], *, width: int = 760, height: int = 
     out.append(f'<line class="bl" x1="{left}" x2="{left + w}" y1="{y(0):.1f}" y2="{y(0):.1f}"/>')
     label_every = max(1, len(steps) // 10)
     for i, (label, v) in enumerate(steps):
-        bw = max(slot * 0.64, 2)
+        bw = min(max(slot * 0.64, 2), 48)
         x0 = left + i * slot + (slot - bw) / 2
         top_y, bot_y = y(max(v, 0)), y(min(v, 0))
         color = GOOD if v >= 0 else CRITICAL

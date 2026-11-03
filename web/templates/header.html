@@ -26,7 +26,7 @@
     <div class="sub">peor sleeve{% if h.equity.drawdown_sleeve %}: {{ h.equity.drawdown_sleeve }}{% endif %}</div></div>
   <div class="kpi"><div class="lab">Posiciones</div>
     <div class="val">{{ h.open_positions }} / {{ h.max_positions }}</div>
-    <div class="sub">abiertas / máximo del floor</div></div>
+    <div class="sub">del bot, abiertas / máximo del floor</div></div>
   <div class="kpi"><div class="lab">Coste IA</div><div class="val">{{ h.ai_cost | money }}</div>
     <div class="sub">sin capa LLM todavía</div></div>
 </div>

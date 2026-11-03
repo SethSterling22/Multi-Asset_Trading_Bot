@@ -19,18 +19,21 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import Engine, text
+from sqlalchemy import Engine, create_engine, text
 
-from api import charts, history, queries, trades
+from api import charts, history, journal, manual, queries, trades
+from core.ledger.fills import AssetType, Side
 
 WEB = Path(__file__).resolve().parents[1] / "web"
 REFRESH_SECONDS = 30
 VIEWS = [("live", "/", "LIVE"), ("pnl", "/pnl", "P&L POR ESTRATEGIA"),
+         ("diario", "/diario", "DIARIO"),
          ("historial", "/historial", "HISTORIAL"), ("operaciones", "/operaciones", "OPERACIONES"),
          ("mercado", "/mercado", "MERCADO"), ("salud", "/salud", "SALUD"),
          ("riesgo", "/riesgo", "RIESGO")]
@@ -102,8 +105,24 @@ def ago(d: timedelta | None) -> str:
     return f"{s / 3600:.1f} h"
 
 
+MONTHS = ("enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto",
+          "septiembre", "octubre", "noviembre", "diciembre")
+
+
+def parse_month(raw: str | None, default: date) -> tuple[int, int]:
+    try:
+        y, m = (int(x) for x in (raw or "").split("-"))
+        date(y, m, 1)
+        return y, m
+    except ValueError:
+        return default.year, default.month
+
+
 def create_app(engine: Engine, *, redis_url: str | None,
-               clock: Callable[[], datetime] = lambda: datetime.now(UTC)) -> FastAPI:
+               clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+               manual_engine: Engine | None = None) -> FastAPI:
+    """`manual_engine` es la conexión con el rol `manual_journal` (D-017): sin ella el
+    formulario del diario manual está desactivado y el dashboard no escribe nada."""
     app = FastAPI(title="Multi-Asset Trading Bot", docs_url=None, redoc_url=None)
     app.mount("/static", StaticFiles(directory=WEB / "static"), name="static")
     templates = Jinja2Templates(directory=WEB / "templates")
@@ -124,7 +143,9 @@ def create_app(engine: Engine, *, redis_url: str | None,
             last_run = queries.last_archive_run(conn)
         return {
             "kill_switch": ks, "live": queries.live_trading(), "equity": eq,
-            "open_positions": len(pos), "max_positions": queries.MAX_OPEN_POSITIONS,
+            # El límite del floor es del bot: las manuales (otra cuenta) no cuentan.
+            "open_positions": sum(1 for k in pos if k.strategy_id != manual.STRATEGY_ID),
+            "max_positions": queries.MAX_OPEN_POSITIONS,
             "today_net": pnl_total.today_net, "ai_cost": pnl_total.ai_cost,
             "archive_lag": None if last_run is None else clock() - last_run,
             "now": clock(),
@@ -184,6 +205,45 @@ def create_app(engine: Engine, *, redis_url: str | None,
                                                            colors=colors)
                     out[f"fr_{asset}_legend"] = charts.legend(list(fr), colors)
                 return out
+            if name == "diario":
+                mode = params.get("modo") if params.get("modo") in journal.MODES else "equity"
+                runs = journal.backtest_runs(conn)
+                source = None
+                fuente = params.get("fuente", "real")
+                if fuente.startswith("bt:") and fuente[3:].isdigit():
+                    source = journal.backtest_source(conn, int(fuente[3:]), mode=mode)
+                sleeve = params.get("sleeve") or None
+                if source is None:
+                    fuente = "real"
+                    source = journal.real_source(conn, sleeve=sleeve, until=now.date(),
+                                                 mode=mode)
+                last_day = max(source.daily, default=now.date()) if fuente != "real" \
+                    else now.date()
+                year, month = parse_month(params.get("mes"), last_day)
+                first = date(year, month, 1)
+                prev_m = (first - timedelta(days=1)).strftime("%Y-%m")
+                next_m = (first + timedelta(days=32)).strftime("%Y-%m")
+                recent = sorted(source.daily.values(), key=lambda d: d.day)[-60:]
+                total, active = journal.month_total(source.daily, year, month)
+                return {
+                    "source": source, "fuente": fuente, "sleeve": sleeve, "mode": mode,
+                    "runs": [(f"bt:{r.id}", journal.run_label(r)) for r in runs],
+                    "sleeves": journal.sleeves_with_activity(conn), "stats": journal.stats(source),
+                    "year": year, "month": month, "month_name": f"{MONTHS[month - 1]} {year}",
+                    "weeks": journal.month_weeks(year, month, source.daily),
+                    "month_pnl": total, "month_days": active, "prev": prev_m, "next": next_m,
+                    "query_base": "&".join(f"{k}={v}" for k, v in (
+                        ("fuente", fuente), ("sleeve", sleeve or ""), ("modo", mode))),
+                    "balance_svg": charts.line_chart(
+                        {"Balance": source.equity, "Asignado (depósitos)": source.allocated},
+                        y_format=lambda v: f"${v:,.0f}"),
+                    "balance_legend": charts.legend(["Balance", "Asignado (depósitos)"]),
+                    "daily_svg": charts.bars([(d.day.strftime("%d %b"), d.pnl) for d in recent],
+                                             money=money),
+                    "hour_svg": charts.bars(journal.pnl_by_hour(source.trades), money=money),
+                    "recent_trades": source.trades[:50],
+                    "manual_enabled": manual_engine is not None,
+                }
             if name == "operaciones":
                 rows = trades.trades(conn)
                 return {"trades": rows, "totals": trades.totals(rows)}
@@ -203,6 +263,53 @@ def create_app(engine: Engine, *, redis_url: str | None,
             "h": header(), "v": view(name, dict(request.query_params)),
             "view_template": f"{name}.html",
         })
+
+    # -- Diario manual: el único camino de escritura (rol manual_journal, D-017) ---------
+    def manual_page(request: Request, *, form: dict[str, str], errors: list[str],
+                    preview: manual.ManualEntry | None = None,
+                    status_code: int = 200) -> HTMLResponse:
+        return templates.TemplateResponse(request, "page.html", {
+            "views": VIEWS, "current": "diario", "refresh": REFRESH_SECONDS, "query": "",
+            "no_refresh": True, "h": header(), "view_template": "manual.html",
+            "v": {"form": form, "errors": errors, "preview": preview, "zones": manual.ZONES,
+                  "types": [t.value for t in AssetType], "sides": [s.value for s in Side],
+                  "enabled": manual_engine is not None},
+        }, status_code=status_code)
+
+    @app.get("/diario/nueva", response_class=HTMLResponse)
+    def manual_form(request: Request) -> HTMLResponse:
+        local = clock().astimezone(ZoneInfo(manual.ZONES[0]))
+        # "Corregir" vuelve aquí con los campos en la URL: se rellenan con ellos.
+        return manual_page(request, errors=[], form={
+            "fecha": f"{local:%Y-%m-%d}", "hora": f"{local:%H:%M}", "zona": manual.ZONES[0],
+            "tipo": "stock", "lado": "buy", "comision": "0", **dict(request.query_params)})
+
+    @app.post("/diario/revisar", response_class=HTMLResponse)
+    async def manual_review(request: Request) -> HTMLResponse:
+        form = {k: str(v) for k, v in (await request.form()).items()}
+        if not manual.same_origin(dict(request.headers)):
+            return HTMLResponse("origen no permitido", status_code=403)
+        entry = manual.parse(form, now=clock())
+        if isinstance(entry, list):
+            return manual_page(request, form=form, errors=entry, status_code=422)
+        return manual_page(request, form=entry.as_form(form.get("zona", manual.ZONES[0])),
+                           errors=[], preview=entry)
+
+    @app.post("/diario/registrar", response_model=None)
+    async def manual_record(request: Request) -> HTMLResponse | RedirectResponse:
+        form = {k: str(v) for k, v in (await request.form()).items()}
+        if not manual.same_origin(dict(request.headers)):
+            return HTMLResponse("origen no permitido", status_code=403)
+        if manual_engine is None:
+            return HTMLResponse("registro manual desactivado (sin MANUAL_DATABASE_URL)",
+                                status_code=503)
+        entry = manual.parse(form, now=clock())
+        if isinstance(entry, list):
+            return manual_page(request, form=form, errors=entry, status_code=422)
+        manual.record(manual_engine, entry)
+        # Post/Redirect/Get: recargar la página no registra la operación otra vez.
+        return RedirectResponse(f"/diario?sleeve=manual&mes={entry.ts:%Y-%m}",
+                                status_code=303)
 
     for name, path, _ in VIEWS:
         def handler(request: Request, _name: str = name) -> HTMLResponse:
@@ -231,9 +338,11 @@ def create_app(engine: Engine, *, redis_url: str | None,
             "Content-Disposition": 'attachment; filename="historial_diario.csv"'})
 
     @app.get("/export/operaciones.csv")
-    def export_trades() -> PlainTextResponse:
+    def export_trades(fuente: str = "real") -> PlainTextResponse:
         with engine.connect() as conn:
-            rows = trades.trades(conn)
+            src = (journal.backtest_source(conn, int(fuente[3:]), mode="equity")
+                   if fuente.startswith("bt:") and fuente[3:].isdigit() else None)
+            rows = src.trades if src is not None else trades.trades(conn)
         return PlainTextResponse(trades.trades_csv(rows), media_type="text/csv", headers={
             "Content-Disposition": 'attachment; filename="operaciones.csv"'})
 
@@ -262,6 +371,10 @@ def main() -> None:
     import uvicorn
 
     engine = queries.readonly_engine(os.environ["DATABASE_URL"])
-    app = create_app(engine, redis_url=os.environ.get("REDIS_URL"))
+    # Opcional: sin ella el formulario del diario manual queda desactivado (D-017).
+    manual_url = os.environ.get("MANUAL_DATABASE_URL")
+    app = create_app(engine, redis_url=os.environ.get("REDIS_URL"),
+                     manual_engine=create_engine(manual_url, pool_pre_ping=True)
+                     if manual_url else None)
     uvicorn.run(app, host=os.environ.get("DASHBOARD_HOST", "0.0.0.0"),  # noqa: S104 — en contenedor
                 port=int(os.environ.get("DASHBOARD_PORT", "8000")), proxy_headers=False)

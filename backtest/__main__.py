@@ -23,6 +23,7 @@ from backtest.data import load_daily
 from backtest.engine import BacktestResult, buy_and_hold, run_crypto_rebalance, static_weights
 from backtest.registry import PostgresSearchLog
 from backtest.report import render
+from backtest.runs import save_runs
 from core.config.models import CONFIG_PATH, TradingConfig
 
 # Barrido: 5 umbrales × 4 asignaciones a USDC = 20 configuraciones. Todas cuentan en N.
@@ -52,7 +53,8 @@ def main() -> None:
     base = TradingConfig.load(CONFIG_PATH)
     symbols = base.crypto_parameters.monitored_assets
     bars = {s: load_daily(f"{s}-USD", args.start, args.end, CACHE) for s in symbols}
-    registry = PostgresSearchLog(create_engine(args.database_url))
+    engine = create_engine(args.database_url)
+    registry = PostgresSearchLog(engine)
 
     sweep = []
     for threshold, stable in itertools.product(THRESHOLDS, STABLE_ALLOCATIONS):
@@ -77,6 +79,9 @@ def main() -> None:
                                      slippage_bps=args.slippage_bps),
     )
     print(report)
+    # Cada configuración, con sus operaciones, para el dashboard (Diario, D-017).
+    saved = save_runs(engine, sweep, registry=registry, candidate_hash=candidate.params_hash)
+    print(f"\n{saved} corridas guardadas en backtest_runs (dashboard → Diario).")
     if args.out:
         args.out.write_text(report + "\n")
 

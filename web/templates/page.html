@@ -17,8 +17,8 @@
       <a href="{{ path }}" {% if name == current %}aria-current="page"{% endif %}>{{ label }}</a>
     {% endfor %}
   </nav>
-  <section id="view" hx-get="/partials/{{ current }}{{ query }}" hx-trigger="every {{ refresh }}s"
-           hx-swap="innerHTML">
+  <section id="view" {% if not no_refresh %}hx-get="/partials/{{ current }}{{ query }}"
+           hx-trigger="every {{ refresh }}s" hx-swap="innerHTML"{% endif %}>
     {% include view_template %}
   </section>
   <footer>

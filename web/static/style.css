@@ -140,3 +140,38 @@ td.wrap{white-space:normal;text-align:left;max-width:520px}
 tr.sel td{background:var(--surface-2)}
 .card{overflow-x:auto}           /* una tabla ancha se desplaza dentro de su tarjeta */
 details summary{cursor:pointer}
+/* ---- diario ---- */
+.daynav label{display:flex;align-items:center;gap:6px;color:var(--ink-3);font-size:11.5px}
+.daynav select{background:var(--surface-3);border:1px solid var(--hair);color:var(--ink);border-radius:6px;
+  padding:4px 6px;font-size:12px;max-width:340px}
+.btn{background:rgba(57,135,229,.15);border:1px solid rgba(57,135,229,.5);color:#8fbaf0;border-radius:6px;
+  padding:5px 12px;font-family:var(--mono);font-size:11.5px;text-decoration:none}
+.banner{background:var(--surface-2);border:1px solid var(--axis);border-radius:8px;padding:10px 12px;
+  font-size:12.5px;color:var(--ink-2);margin:10px 0}
+.calhead{display:flex;align-items:center;gap:12px;margin-bottom:10px}
+.calhead a{color:var(--ink-2);text-decoration:none;font-size:18px;padding:0 6px}
+.calhead h2{margin:0;text-transform:capitalize}
+.cal{display:grid;grid-template-columns:repeat(7,1fr) 1.1fr;gap:6px}
+.calh{font-family:var(--mono);font-size:10.5px;color:var(--ink-3);text-align:center;letter-spacing:.06em;padding:2px 0}
+.calc,.calw{min-height:78px;border-radius:7px;background:var(--surface-2);border:1px solid var(--hair);
+  padding:6px 8px;display:flex;flex-direction:column;gap:2px;text-decoration:none;color:var(--ink-2)}
+.calc.out{background:transparent;border-color:transparent}
+.calc.win{background:rgba(12,163,12,.12);border-color:rgba(12,163,12,.55)}
+.calc.loss{background:rgba(208,59,59,.13);border-color:rgba(208,59,59,.55)}
+.calc.flat{background:rgba(57,135,229,.10);border-color:rgba(57,135,229,.45)}
+.calc:hover{filter:brightness(1.25)}
+.dnum{font-size:11px;color:var(--ink-3);align-self:flex-end}
+.dval{font-size:14px;font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums}
+.dsub{font-size:10.5px;color:var(--ink-3)}
+.calw{background:var(--surface-1)}
+.calw .lab{font-size:10.5px;color:var(--ink-3)}
+.mform{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px 14px;align-items:end}
+.mform label{display:flex;flex-direction:column;gap:4px;font-size:11.5px;color:var(--ink-3)}
+.mform .wide{grid-column:1/-1}
+.mform input,.mform select,.mform textarea{background:var(--surface-3);border:1px solid var(--hair);color:var(--ink);
+  border-radius:6px;padding:6px 8px;font-size:13px;font-family:var(--sans)}
+.mform textarea{min-height:70px}
+.mform button{background:rgba(12,163,12,.15);border:1px solid rgba(12,163,12,.55);color:#7ede7e;border-radius:6px;
+  padding:8px 14px;font-family:var(--mono);font-size:12px;cursor:pointer;justify-self:start}
+.mform button[disabled]{opacity:.4;cursor:not-allowed}
+.mform button.secondary{background:var(--surface-3);border-color:var(--hair);color:var(--ink-2)}
