@@ -242,12 +242,22 @@ class EquityCurveLossReference:
     Persistido en `equity_curve`: un reinicio a mitad de sesión encuentra el
     snapshot que escribió el proceso anterior, en lugar de tomar la equity actual
     como punto de partida y ocultar la pérdida del día.
+
+    Se mide P&L, no capital asignado: la referencia es el P&L de ese primer snapshot
+    (equity − asignado) sobre lo asignado AHORA (último snapshot). Con la asignación
+    constante es exactamente la equity de ese snapshot. Si la asignación cambia (un
+    sleeve que pasa a tener presupuesto propio, D-016), cambiarla no cuenta como
+    pérdida ni como ganancia; una pérdida de verdad sigue contando entera.
     """
 
     _QUERY = text("""
-        SELECT equity_usd FROM equity_curve
-        WHERE strategy_id = :strategy_id AND ts >= :since
-        ORDER BY ts LIMIT 1
+        SELECT first.equity_usd - first.allocated_usd + latest.allocated_usd
+        FROM (SELECT equity_usd, allocated_usd FROM equity_curve
+              WHERE strategy_id = :strategy_id AND ts >= :since
+              ORDER BY ts LIMIT 1) AS first
+        CROSS JOIN (SELECT allocated_usd FROM equity_curve
+                    WHERE strategy_id = :strategy_id
+                    ORDER BY ts DESC LIMIT 1) AS latest
     """)
 
     def __init__(self, engine: Engine, tz: tzinfo) -> None:

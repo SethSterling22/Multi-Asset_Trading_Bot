@@ -564,3 +564,35 @@ informe; aquí queda el resumen y la sección donde se justifica cada una.
 - **Lo que costó el primer día:** 4 000.82 $ pagados; 10.00 $ de comisión (0.25 %) y
   1.27 $ de slippage frente al mid en la decisión. El resto es que BTC y ETH bajaron un
   ~1–1.5 % tras la entrada: es mercado, no un defecto.
+
+---
+
+## 2026-11-03 · D-016 · El Wheel con cuenta propia: presupuesto y ledger, no la cuenta del broker
+
+- **Contexto:** el Wheel y el sleeve cripto comparten una cuenta paper de Alpaca (D-014).
+  El Wheel tomaba como suyas la equity (`get_portfolio_value()`) y la caja (`get_cash()`)
+  de toda la cuenta. Tres efectos: la cripto contaba como equity del Wheel (su −0.08 % del
+  2026-11-02 era la cripto, sin un solo fill del Wheel); la cabecera del dashboard contaba
+  la cripto dos veces; y la caja del presupuesto cripto podía acabar de colateral de una put.
+- **Decisiones:**
+  1. `WHEEL_BUDGET_USD` (obligatorio). Equity del Wheel = presupuesto + realizado −
+     comisiones + no realizado a precio de marca de SUS posiciones. Caja = min(presupuesto +
+     flujo de caja de sus fills, caja real de la cuenta): el presupuesto no promete dinero
+     que la cuenta no tiene. Es el mismo modelo que el sleeve cripto (`sleeve_cash`, ahora en
+     `core/ledger/equity.py`), en `strategies/wheel/accounting.py`, probado sin Lumibot.
+  2. Marca de una opción = el mid, el mismo precio con el que decide. Una posición abierta sin
+     precio no se estima: esa iteración no escribe snapshot ni opera (rechazo `no_mark`).
+  3. **La referencia de la pérdida diaria/semanal mide P&L, no capital asignado:** P&L del
+     primer snapshot (equity − asignado) sobre lo asignado ahora. Con la asignación constante
+     es idéntica a antes. Sin esto, pasar de ~99 900 $ (cuenta entera) a 90 000 $ habría
+     parecido una caída del 10 % y habría disparado el stop semanal. El drawdown del dashboard
+     usa la misma curva, y el historial separa el cambio en "Δ asignado".
+  4. **Lo que NO cambia todavía:** las órdenes del Wheel siguen por Lumibot, a mercado, sin
+     write-ahead ni reconciliación. Pasarlas al router necesita órdenes limit de opciones y
+     reconciliar asignaciones y vencimientos, que mueven posiciones sin orden propia. Eso
+     depende de cómo los reporta Alpaca en paper (actividades OPASN/OPEXP), y hay que
+     verificarlo en horario de mercado antes de escribirlo (CLAUDE.md §5). Es el siguiente
+     paso.
+- **Efecto visible el día del cambio:** en Historial, el Wheel pasa de ~99 900 $ a 90 000 $
+  con todo el cambio en "Δ asignado" y 0 en "fuera del ledger". La cabecera pasa a sumar
+  90 000 $ + la equity del sleeve cripto.

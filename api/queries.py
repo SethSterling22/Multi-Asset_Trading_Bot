@@ -214,6 +214,19 @@ def equity_series(conn: Connection, since: datetime) -> dict[str, list[tuple[dat
     return dict(out)
 
 
+def pnl_curves(conn: Connection, since: datetime) -> dict[str, list[float]]:
+    """La equity de cada sleeve sin los cambios de capital asignado: el P&L de cada
+    snapshot (equity − asignado) sobre lo asignado ahora. Es la curva del drawdown: que un
+    sleeve pase a tener presupuesto propio (D-016) no es una caída."""
+    raw: dict[str, list[tuple[float, float]]] = defaultdict(list)
+    for r in conn.execute(text(
+        "SELECT strategy_id, equity_usd, allocated_usd FROM equity_curve"
+        " WHERE ts >= :since ORDER BY ts"
+    ), {"since": since}):
+        raw[r.strategy_id].append((float(r.equity_usd), float(r.allocated_usd)))
+    return {sid: [e - a + pts[-1][1] for e, a in pts] for sid, pts in raw.items()}
+
+
 @dataclass
 class EquityKpis:
     equity: float | None = None
@@ -222,7 +235,9 @@ class EquityKpis:
     drawdown_sleeve: str | None = None   # de qué sleeve es
 
 
-def equity_kpis(series: dict[str, list[tuple[datetime, float]]]) -> EquityKpis:
+def equity_kpis(series: dict[str, list[tuple[datetime, float]]],
+                curves: dict[str, list[float]] | None = None) -> EquityKpis:
+    """`curves`, si se dan, son las del drawdown (pnl_curves); si no, la equity tal cual."""
     if not series:
         return EquityKpis()
     latest = sum(pts[-1][1] for pts in series.values() if pts)
@@ -230,7 +245,9 @@ def equity_kpis(series: dict[str, list[tuple[datetime, float]]]) -> EquityKpis:
     first_today = [next((v for t, v in pts if t >= start_of_day), None) for pts in series.values()]
     day = (latest - sum(v for v in first_today if v is not None)
            if all(v is not None for v in first_today) else None)
-    dds = {sid: max_drawdown([v for _, v in pts]) for sid, pts in series.items() if len(pts) > 1}
+    curves = curves if curves is not None else {
+        sid: [v for _, v in pts] for sid, pts in series.items()}
+    dds = {sid: max_drawdown(c) for sid, c in curves.items() if len(c) > 1}
     worst = min(dds, key=lambda k: dds[k], default=None)
     return EquityKpis(equity=latest, day_change=day,
                       drawdown=None if worst is None else dds[worst],

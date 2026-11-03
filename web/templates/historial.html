@@ -3,15 +3,16 @@
   <p class="hint">Un día por fila y sleeve, en UTC. El cambio de equity se mide desde el cierre del día
     anterior (su último snapshot) hasta el último snapshot del día, y se reparte en
     <b>realizado neto</b> (fills cerrados, menos comisiones, más funding), <b>Δ no realizado</b>
-    (posiciones abiertas que suben o bajan de precio) y <b>fuera del ledger</b>: lo que no explican
-    las operaciones del sleeve. En el Wheel, que hoy toma la equity de la cuenta entera de Alpaca,
-    ahí cae todo lo que hace la cripto de esa misma cuenta.
+    (posiciones abiertas que suben o bajan de precio), <b>Δ asignado</b> (capital que se asigna o se
+    retira del sleeve: no es ganancia ni pérdida) y <b>fuera del ledger</b>, lo que no explican las
+    operaciones del sleeve, que debería ser ~0. Los snapshots del Wheel anteriores a D-016 tomaban la
+    cuenta entera de Alpaca como asignado: lo que hacía esa cuenta (cripto incluida) cae en Δ asignado.
     Pulsa un día para ver su detalle. <a href="/export/historial.csv">Descargar CSV</a> ·
     <a href="/export/fills.csv">todos los fills en CSV</a></p>
   {% if v.rows %}
   <table>
     <thead><tr><th>Día</th><th>Sleeve</th><th>Apertura</th><th>Cierre</th><th>Cambio</th><th>%</th>
-      <th>Realizado neto</th><th>Δ no realizado</th><th>Fuera del ledger</th><th>Comisiones</th>
+      <th>Realizado neto</th><th>Δ no realizado</th><th>Δ asignado</th><th>Fuera del ledger</th><th>Comisiones</th>
       <th>Slippage</th><th>Fills</th><th>Órdenes</th><th>Rechazadas</th><th>Mismatches</th></tr></thead>
     <tbody>{% for r in v.rows %}
       <tr class="{% if r.day == v.day %}sel{% endif %}">
@@ -22,6 +23,7 @@
         <td class="{{ r.change_pct | cls }}">{{ r.change_pct | pct }}</td>
         <td class="{{ r.realized_net | cls }}">{{ r.realized_net | money }}</td>
         <td class="{{ r.unrealized_change | cls }}">{{ r.unrealized_change | money }}</td>
+        <td class="neu">{{ r.allocated_change | money }}</td>
         <td class="{{ r.outside_ledger | cls }}">{{ r.outside_ledger | money }}</td>
         <td>{{ r.fees | money }}</td><td>{{ r.slippage | money }}</td>
         <td>{{ r.n_fills }}</td><td>{{ r.n_orders }}</td>
@@ -57,7 +59,7 @@
   <p class="hint"><b>{{ r.strategy_id }}</b>: {{ r.open_equity | money }} → {{ r.close_equity | money }}
     (<span class="{{ r.change | cls }}">{{ r.change | money }}, {{ r.change_pct | pct }}</span>) =
     realizado neto {{ r.realized_net | money }} + Δ no realizado {{ r.unrealized_change | money }}
-    + fuera del ledger {{ r.outside_ledger | money }}.</p>
+    + Δ asignado {{ r.allocated_change | money }} + fuera del ledger {{ r.outside_ledger | money }}.</p>
   {% endif %}{% endfor %}
 
   <div class="sub-h">Por qué se movió el no realizado · precio de cada posición abierta</div>

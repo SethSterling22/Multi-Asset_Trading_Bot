@@ -89,7 +89,8 @@ ignore = [
 [tool.mypy]
 python_version = "3.12"
 files = ["core", "risk", "brokers", "execution", "strategies/base.py", "strategies/runtime.py",
-         "strategies/wheel/logic.py", "strategies/crypto_rebalance/live.py"]
+         "strategies/wheel/logic.py", "strategies/wheel/accounting.py",
+         "strategies/crypto_rebalance/live.py"]
 strict = true
 warn_unreachable = true
 

@@ -6,10 +6,11 @@ así que, entre dos snapshots,
     Δequity = realizado neto de los fills entre ambos + Δno realizado + Δasignado.
 
 Cada día se mide desde el último snapshot ANTERIOR al día (el cierre de ayer) hasta el
-último del día, y la columna "fuera del ledger" es lo que queda: Δequity − realizado −
-Δno realizado. En un sleeve que deriva su equity de sus fills es ~0. En el Wheel, que
-hoy toma la equity de la cuenta entera del broker, es TODO el cambio: ahí se ve que
-no lo explican sus operaciones.
+último del día. "Δ asignado" es el cambio de capital asignado al sleeve: no es ganancia
+ni pérdida (en los snapshots del Wheel anteriores a D-016, que tomaban la cuenta entera
+del broker como asignado, ahí cae lo que hacía la cuenta). "Fuera del ledger" es lo que
+queda: Δequity − realizado − Δno realizado − Δasignado, y en un sleeve que deriva su
+equity de sus fills es ~0.
 
 Los días son UTC, como en el resto del ledger.
 """
@@ -49,6 +50,8 @@ class DayRow:
     close_equity: float | None = None      # último snapshot del día
     open_unrealized: float = 0.0
     close_unrealized: float = 0.0
+    open_allocated: float = 0.0
+    close_allocated: float = 0.0
     realized_net: Decimal = ZERO           # realizado − comisiones + funding, entre snapshots
     fees: Decimal = ZERO
     funding: Decimal = ZERO
@@ -75,9 +78,14 @@ class DayRow:
         return self.close_unrealized - self.open_unrealized
 
     @property
+    def allocated_change(self) -> float:
+        return self.close_allocated - self.open_allocated
+
+    @property
     def outside_ledger(self) -> float | None:
         c = self.change
-        return None if c is None else c - float(self.realized_net) - self.unrealized_change
+        return None if c is None else (c - float(self.realized_net) - self.unrealized_change
+                                       - self.allocated_change)
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,20 +93,23 @@ class _Snap:
     ts: datetime
     equity: float
     unrealized: float
+    allocated: float
 
 
 def _snapshots(conn: Connection, since: datetime) -> dict[str, list[_Snap]]:
     """Por sleeve, en orden; incluye el último anterior a `since` (el cierre previo)."""
     out: dict[str, list[_Snap]] = defaultdict(list)
     for r in conn.execute(text("""
-        SELECT strategy_id, ts, equity_usd, unrealized_pnl FROM (
+        SELECT strategy_id, ts, equity_usd, unrealized_pnl, allocated_usd FROM (
           SELECT DISTINCT ON (strategy_id) * FROM equity_curve
           WHERE ts < :since ORDER BY strategy_id, ts DESC) prev
         UNION ALL
-        SELECT strategy_id, ts, equity_usd, unrealized_pnl FROM equity_curve WHERE ts >= :since
+        SELECT strategy_id, ts, equity_usd, unrealized_pnl, allocated_usd FROM equity_curve
+        WHERE ts >= :since
         ORDER BY strategy_id, ts
     """), {"since": since}):
-        out[r.strategy_id].append(_Snap(r.ts, float(r.equity_usd), float(r.unrealized_pnl)))
+        out[r.strategy_id].append(_Snap(r.ts, float(r.equity_usd), float(r.unrealized_pnl),
+                                        float(r.allocated_usd)))
     return dict(out)
 
 
@@ -125,7 +136,9 @@ def daily_history(conn: Connection, *, until: date, days: int = DEFAULT_DAYS) ->
                 # Abre en el cierre anterior; sin historia previa, en el primer snapshot.
                 base = prev or s
                 r.open_equity, r.open_unrealized = base.equity, base.unrealized
+                r.open_allocated = base.allocated
             r.close_equity, r.close_unrealized = s.equity, s.unrealized
+            r.close_allocated = s.allocated
             r.n_snapshots += 1
             prev = s
 
@@ -258,7 +271,8 @@ def activity_days(conn: Connection) -> tuple[date | None, date | None]:
 # CSV: el mismo historial, para comparar con un backtest o abrir en una hoja
 # ---------------------------------------------------------------------------
 HISTORY_COLUMNS = ("day", "strategy_id", "open_equity", "close_equity", "change", "change_pct",
-                   "realized_net", "unrealized_change", "outside_ledger", "fees", "funding",
+                   "realized_net", "unrealized_change", "allocated_change", "outside_ledger",
+                   "fees", "funding",
                    "slippage", "n_fills", "n_orders", "n_rejected", "n_snapshots", "mismatches")
 FILL_COLUMNS = ("ts", "strategy_id", "venue", "symbol", "kind", "side", "qty", "price",
                 "notional", "commission", "slippage", "funding", "realized", "client_order_id")

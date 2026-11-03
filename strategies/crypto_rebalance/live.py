@@ -37,7 +37,7 @@ from sqlalchemy import Engine, create_engine
 
 from brokers.base import Quote, SpotVenue, VenueUnavailableError, normalize_symbol
 from core import log
-from core.ledger.equity import snapshot, write_marks
+from core.ledger.equity import sleeve_cash, snapshot, write_marks
 from core.ledger.fills import AssetType, Fill, fetch_fills
 from core.risk_floor import floor_hash
 from execution.idempotency import OrderIntent, client_order_id
@@ -61,14 +61,6 @@ def floor_to(qty: Decimal, increment: Decimal) -> Decimal:
     if increment <= 0:
         raise ValueError("increment > 0")
     return (qty / increment).to_integral_value(rounding=ROUND_DOWN) * increment
-
-
-def sleeve_cash(fills: list[Fill], budget: Decimal) -> Decimal:
-    """Presupuesto + flujo de caja de los fills del sleeve, neto de costes (§3.4)."""
-    cash = budget
-    for f in fills:
-        cash += -f.signed_qty * f.price * f.multiplier - f.commission + f.funding_payment
-    return cash
 
 
 def holdings(fills: list[Fill]) -> dict[str, Decimal]:

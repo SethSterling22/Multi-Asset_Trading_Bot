@@ -4,8 +4,9 @@ Dos días, dos sleeves:
 - crypto_rebalance: cierra el día 1 en 10 000 (sin posiciones). El día 2 compra 0.01 BTC
   a 60 000 con 10 $ de comisión y cierra en 9 950 con −40 de no realizado:
       Δ = −50 = realizado neto (−10) + Δ no realizado (−40) + fuera del ledger (0).
-- wheel: 100 000 → 99 900 sin un solo fill: los −100 son "fuera del ledger", que es
-  justo lo que pasa cuando un sleeve toma la equity de la cuenta entera del broker.
+- wheel: 100 000 → 99 900 sin un solo fill, con snapshots al estilo de antes de D-016
+  (la cuenta entera del broker como equity Y como asignado): los −100 caen en
+  "Δ asignado", no en ganancia o pérdida del Wheel.
 El día 2 la reconciliación encuentra 2 mismatches en crypto_rebalance y lo para.
 """
 
@@ -70,8 +71,9 @@ def setup() -> Iterator[tuple[TestClient, str]]:
             for sid, ts, eq, unreal in snaps:
                 conn.execute(text(
                     "INSERT INTO equity_curve (ts, strategy_id, equity_usd, allocated_usd,"
-                    " gross_notional, unrealized_pnl) VALUES (:ts, :s, :e, :e, 0, :u)"),
-                    {"ts": ts, "s": sid, "e": eq, "u": unreal})
+                    " gross_notional, unrealized_pnl) VALUES (:ts, :s, :e, :a, 0, :u)"),
+                    {"ts": ts, "s": sid, "e": eq, "u": unreal,
+                     "a": 10_000 if sid == "crypto_rebalance" else eq})
             conn.execute(text("""
                 INSERT INTO reconciliation_runs (ts, venue, mismatches, detail, action_taken)
                 VALUES (:ts, 'alpaca', 2, CAST(:d AS jsonb), 'safe_mode')
@@ -107,8 +109,10 @@ def test_day_change_is_decomposed_to_the_cent(setup: tuple[TestClient, str]) -> 
     assert crypto.slippage == D("0.10")                 # (60 000 − 59 990) × 0.01
     assert (crypto.n_fills, crypto.n_orders, crypto.n_rejected, crypto.mismatches) == (1, 2, 1, 2)
 
+    assert crypto.allocated_change == 0
     wheel = rows[("2026-11-02", "wheel")]
-    assert wheel.change == -100 and wheel.realized_net == 0 and wheel.outside_ledger == -100
+    assert wheel.change == -100 and wheel.realized_net == 0
+    assert wheel.allocated_change == -100 and wheel.outside_ledger == 0
     # El primer día no tiene cierre anterior: abre en su propio primer snapshot.
     assert rows[("2026-11-01", "wheel")].change == 0
 
@@ -137,7 +141,8 @@ def test_a_halted_sleeve_is_visible(setup: tuple[TestClient, str]) -> None:
 
 def test_drawdown_names_its_sleeve(setup: tuple[TestClient, str]) -> None:
     header = setup[0].get("/partials/header").text
-    assert "peor sleeve: crypto_rebalance" in header        # −0.5 % frente a −0.1 %
+    # crypto −0.5 %; el Wheel, con su caída toda en "asignado", no tiene drawdown.
+    assert "peor sleeve: crypto_rebalance" in header and "-0.50%" in header
 
 
 def test_csv_exports(setup: tuple[TestClient, str]) -> None:

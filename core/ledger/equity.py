@@ -76,6 +76,16 @@ def snapshot(
     )
 
 
+def sleeve_cash(fills: Iterable[Fill], budget: Decimal) -> Decimal:
+    """Caja de un sleeve con presupuesto propio: el presupuesto más el flujo de caja de
+    SUS fills, neto de costes (CLAUDE.md §3.4). No es la caja de la cuenta del broker,
+    que pueden compartir varios sleeves."""
+    cash = budget
+    for f in fills:
+        cash += -f.signed_qty * f.price * f.multiplier - f.commission + f.funding_payment
+    return cash
+
+
 def write_snapshot(conn: Connection, snap: EquitySnapshot) -> bool:
     """Escribe el snapshot; reescribir el mismo (strategy_id, ts) es un no-op."""
     row = conn.execute(

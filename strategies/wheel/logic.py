@@ -23,6 +23,7 @@ Lo que cambió respecto al original, por la auditoría de la Sesión 0:
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -59,6 +60,20 @@ class OptionContract:
         """Símbolo OCC: AAPL261218P00150000."""
         code = "C" if self.right is Right.CALL else "P"
         return f"{self.underlying}{self.expiration:%y%m%d}{code}{int(self.strike * 1000):08d}"
+
+    @classmethod
+    def from_occ(cls, symbol: str) -> OptionContract:
+        """Inversa de `occ_symbol`: subyacente, AAMMDD, C/P y strike·1000 en 8 dígitos."""
+        m = _OCC.fullmatch(symbol)
+        if m is None:
+            raise ValueError(f"símbolo OCC inválido: {symbol!r}")
+        root, ymd, code, strike = m.groups()
+        expiration = date(2000 + int(ymd[:2]), int(ymd[2:4]), int(ymd[4:]))
+        return cls(root, expiration, Decimal(strike) / 1000,
+                   Right.CALL if code == "C" else Right.PUT)
+
+
+_OCC = re.compile(r"([A-Z.]{1,6})(\d{6})([CP])(\d{8})")
 
 
 @dataclass(frozen=True, slots=True)
