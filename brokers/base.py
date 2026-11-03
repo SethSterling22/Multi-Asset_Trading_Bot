@@ -64,6 +64,18 @@ class VenueOrder:
     # Del venue, no del reloj local: reaplicar la misma orden (reconciliación) tiene
     # que producir el mismo fill, o el ledger lo rechaza como conflicto.
     filled_at: datetime | None = None
+    # Comisiones. `fee_qty` se cobra en el activo recibido (lo que llega a la cuenta es
+    # filled_qty − fee_qty); `fee_usd`, en dólares. Ver DECISIONS.md D-015.
+    fee_qty: Decimal = Decimal(0)
+    fee_usd: Decimal = Decimal(0)
+
+
+@dataclass(frozen=True, slots=True)
+class Execution:
+    """Una ejecución (parcial o total) de una orden, como la reporta el venue."""
+
+    qty: Decimal
+    price: Decimal
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,6 +104,7 @@ class SpotVenue(Protocol):
     def cash(self) -> Decimal: ...
     def quote(self, symbol: str) -> Quote: ...
     def rules(self, symbol: str) -> AssetRules: ...
+    def executions(self, venue_order_id: str) -> list[Execution]: ...
 
 
 def normalize_symbol(symbol: str) -> str:
