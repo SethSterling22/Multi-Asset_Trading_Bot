@@ -128,3 +128,15 @@ nav.tabs a:hover{color:var(--ink-2)}
 .reasons{font-family:var(--mono);font-size:11px;color:#ff8f8f;margin:8px 0 0;padding-left:16px}
 td{white-space:nowrap}             /* el signo no se separa de la cifra */
 .sname{white-space:normal}
+.mk{stroke:var(--ink-3);stroke-width:1;stroke-dasharray:3 3}
+.mkh{fill:var(--ink-2)}
+.sub-h{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2);margin:14px 0 6px}
+.daynav{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;font-size:12.5px}
+.daynav input{background:var(--surface-3);border:1px solid var(--hair);color:var(--ink);border-radius:6px;
+  padding:4px 8px;font-family:var(--mono);font-size:12px}
+.daynav button{background:var(--surface-3);border:1px solid var(--hair);color:var(--ink-2);border-radius:6px;
+  padding:4px 10px;font-family:var(--mono);font-size:11px;cursor:pointer}
+td.wrap{white-space:normal;text-align:left;max-width:520px}
+tr.sel td{background:var(--surface-2)}
+.card{overflow-x:auto}           /* una tabla ancha se desplaza dentro de su tarjeta */
+details summary{cursor:pointer}

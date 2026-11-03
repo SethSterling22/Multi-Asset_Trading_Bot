@@ -1,8 +1,12 @@
 <div class="card">
   <h2>Equity por sleeve · 7 días</h2>
-  <p class="hint">De <span class="mono">equity_curve</span>. El Wheel escribe un snapshot por iteración en horario de mercado.</p>
-  {{ v.equity_legend | safe }}
-  {{ v.equity_svg | safe }}
+  <p class="hint">De <span class="mono">equity_curve</span>, un gráfico por sleeve con su propia escala;
+    horas UTC; ▼ = un fill (pasa el ratón para ver cuál). El Wheel escribe un snapshot por iteración
+    en horario de mercado; el rebalanceador cripto, uno por hora. Para ver un día concreto y por qué
+    cambió, <a href="/historial">Historial</a>.</p>
+  {% if v.charts %}<div class="grid2">{% for c in v.charts %}
+    <div><div class="sub-h">{{ c.sleeve }}</div>{{ c.svg | safe }}</div>{% endfor %}</div>
+  {% else %}<p class="empty">Sin snapshots de equity todavía.</p>{% endif %}
 </div>
 <div class="card">
   <h2>Fills de hoy</h2>

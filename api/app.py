@@ -1,8 +1,9 @@
 """Dashboard: FastAPI + Jinja + HTMX, de SOLO LECTURA sobre el ledger (informe §8).
 
 Vistas 1 (Live), 2 (P&L por estrategia), 5 (Salud) y 6 (Riesgo) de la §8.2, más
-Mercado (el archivo de Coinalyze). Las vistas 3 (aprendizaje) y 4 (propuestas)
-dependen de la Fase 3 y no existen todavía.
+Mercado (el archivo de Coinalyze) e Historial (qué pasó cada día y por qué cambió la
+equity, exportable en CSV). Las vistas 3 (aprendizaje) y 4 (propuestas) dependen de la
+Fase 3 y no existen todavía.
 
 No hay ningún POST: el kill switch se activa con /run/trading/HALT, Redis o una fila
 en risk_events. Cada sección se refresca sola con HTMX cada 30 s.
@@ -13,30 +14,54 @@ from __future__ import annotations
 import hashlib
 import os
 from collections.abc import Callable
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import Engine, text
 
-from api import charts, queries
+from api import charts, history, queries
 
 WEB = Path(__file__).resolve().parents[1] / "web"
 REFRESH_SECONDS = 30
 VIEWS = [("live", "/", "LIVE"), ("pnl", "/pnl", "P&L POR ESTRATEGIA"),
+         ("historial", "/historial", "HISTORIAL"),
          ("mercado", "/mercado", "MERCADO"), ("salud", "/salud", "SALUD"),
          ("riesgo", "/riesgo", "RIESGO")]
+
+
+def parse_day(raw: str | None, default: date) -> date:
+    try:
+        return date.fromisoformat(raw) if raw else default
+    except ValueError:
+        return default
+
+
+def fill_marker(f: Any) -> tuple[datetime, str]:
+    return f.ts, (f"{f.ts:%H:%M} UTC · {f.strategy_id} {f.side.value} {quantity(f.qty)} "
+                  f"{f.symbol} @ {money(f.price)}")
+
+
+def sleeve_charts(series: dict[str, list[tuple[datetime, float]]], fills: list[Any],
+                  ) -> list[dict[str, Any]]:
+    """Un gráfico por sleeve: en un eje común, 100 000 $ aplastan a 10 000 $."""
+    out = []
+    for sid, pts in sorted(series.items()):
+        marks = [fill_marker(f) for f in fills if f.strategy_id == sid]
+        out.append({"sleeve": sid, "svg": charts.line_chart(
+            {sid: pts}, height=170, y_format=lambda v: f"${v:,.0f}", markers=marks)})
+    return out
 
 
 def money(v: Any) -> str:
     if v is None:
         return "—"
-    x = float(v)
+    x = round(float(v), 2) + 0.0    # + 0.0: el ruido y el −0.0 no llevan signo
     return f"−${abs(x):,.2f}" if x < 0 else f"${x:,.2f}"
 
 
@@ -55,7 +80,7 @@ def pct(v: Any, digits: int = 2) -> str:
 
 
 def signed_class(v: Any) -> str:
-    if v is None or float(v) == 0:
+    if v is None or round(float(v), 2) == 0:
         return "neu"
     return "up" if float(v) > 0 else "down"
 
@@ -102,14 +127,35 @@ def create_app(engine: Engine, *, redis_url: str | None,
             "now": clock(),
         }
 
-    def view(name: str) -> dict[str, Any]:
+    def view(name: str, params: dict[str, str] | None = None) -> dict[str, Any]:
+        params = params or {}
         now = clock()
         with engine.connect() as conn:
             if name == "live":
-                eq = queries.equity_series(conn, now - timedelta(days=7))
-                return {"equity_svg": charts.line_chart(eq, y_format=lambda v: f"${v:,.0f}"),
-                        "equity_legend": charts.legend(list(eq)),
+                since = now - timedelta(days=7)
+                eq = queries.equity_series(conn, since)
+                return {"charts": sleeve_charts(eq, queries.fills_since(conn, since)),
                         "fills": queries.fills_on(conn, now.date())}
+            if name == "historial":
+                day = parse_day(params.get("day"), now.date())
+                rows = history.daily_history(conn, until=now.date())
+                detail = history.day_detail(conn, day)
+                per_sleeve: dict[str, list[tuple[str, float]]] = {}
+                for r in reversed(rows):
+                    if r.change is not None:
+                        per_sleeve.setdefault(r.strategy_id, []).append(
+                            (r.day.strftime("%d %b"), r.change))
+                first, last = history.activity_days(conn)
+                return {
+                    "day": day, "today": now.date(), "first": first, "last": last,
+                    "prev": day - timedelta(days=1), "next": day + timedelta(days=1),
+                    "rows": rows, "detail": detail,
+                    "day_rows": [r for r in rows if r.day == day],
+                    "bars": [{"sleeve": sid, "svg": charts.bars(steps, money=money)}
+                             for sid, steps in sorted(per_sleeve.items())],
+                    "charts": sleeve_charts(detail.equity, [
+                        f for f in queries.fills_on(conn, day)]),
+                }
             if name == "pnl":
                 rows = queries.pnl_by_strategy(conn, now.date())
                 total = queries.totals(rows)
@@ -135,15 +181,19 @@ def create_app(engine: Engine, *, redis_url: str | None,
                 return out
             if name == "salud":
                 return {"archive": queries.archive_health(conn),
-                        "kill_switch": queries.kill_switch_state(engine, redis_url)}
+                        "kill_switch": queries.kill_switch_state(engine, redis_url),
+                        "by_scope": queries.kill_switch_by_scope(engine, redis_url),
+                        "last_events": queries.last_kill_events(conn)}
             if name == "riesgo":
                 return {"positions": queries.positions(conn), "limits": queries.FLOOR_LIMITS}
         raise KeyError(name)
 
     def page(request: Request, name: str) -> HTMLResponse:
+        query = f"?{request.url.query}" if request.url.query else ""
         return templates.TemplateResponse(request, "page.html", {
-            "views": VIEWS, "current": name, "refresh": REFRESH_SECONDS,
-            "h": header(), "v": view(name), "view_template": f"{name}.html",
+            "views": VIEWS, "current": name, "refresh": REFRESH_SECONDS, "query": query,
+            "h": header(), "v": view(name, dict(request.query_params)),
+            "view_template": f"{name}.html",
         })
 
     for name, path, _ in VIEWS:
@@ -160,7 +210,29 @@ def create_app(engine: Engine, *, redis_url: str | None,
     def view_partial(request: Request, name: str) -> HTMLResponse:
         if name not in {v[0] for v in VIEWS}:
             return HTMLResponse("vista desconocida", status_code=404)
-        return templates.TemplateResponse(request, f"{name}.html", {"v": view(name)})
+        return templates.TemplateResponse(request, f"{name}.html",
+                                          {"v": view(name, dict(request.query_params))})
+
+    # Exportaciones (solo lectura): el historial diario y los fills, para comparar con
+    # un backtest o abrirlos en una hoja de cálculo.
+    @app.get("/export/historial.csv")
+    def export_history(days: int = history.DEFAULT_DAYS) -> PlainTextResponse:
+        with engine.connect() as conn:
+            rows = history.daily_history(conn, until=clock().date(), days=max(1, min(days, 3650)))
+        return PlainTextResponse(history.history_csv(rows), media_type="text/csv", headers={
+            "Content-Disposition": 'attachment; filename="historial_diario.csv"'})
+
+    @app.get("/export/fills.csv")
+    def export_fills(day: str | None = None) -> PlainTextResponse:
+        with engine.connect() as conn:
+            if day:
+                fills = history.day_detail(conn, parse_day(day, clock().date())).fills
+                name = f"fills_{day}.csv"
+            else:
+                fills = history.all_fills(conn)
+                name = "fills.csv"
+        return PlainTextResponse(history.fills_csv(fills), media_type="text/csv", headers={
+            "Content-Disposition": f'attachment; filename="{name}"'})
 
     @app.get("/healthz")
     def healthz() -> JSONResponse:

@@ -62,22 +62,48 @@ def readonly_engine(url: str) -> Engine:
 # ---------------------------------------------------------------------------
 # Estado del sistema
 # ---------------------------------------------------------------------------
-def kill_switch_state(engine: Engine, redis_url: str | None) -> KillSwitchState:
-    """Las tres fuentes más config.json. Sin Redis configurado, esa fuente da error y
-    cuenta como activa: el dashboard enseña lo mismo que vería la estrategia."""
+def _kill_switch(engine: Engine, redis_url: str | None) -> KillSwitch:
     import redis
 
     def no_redis(_: str) -> bool:
         raise RuntimeError("REDIS_URL no configurada")
 
     params = ParamsLoader(CONFIG_PATH)
-    ks = KillSwitch(
+    return KillSwitch(
         risk_events=risk_events_source(engine),
         redis=redis_source(redis.Redis.from_url(redis_url)) if redis_url else no_redis,
         halt_file=file_source(),
         extra={"config.json": config_kill_source(params)},
     )
-    return ks.state("global")
+
+
+def kill_switch_by_scope(engine: Engine, redis_url: str | None) -> dict[str, KillSwitchState]:
+    """El estado para 'global' y para CADA sleeve: la reconciliación para un sleeve
+    concreto (scope = strategy_id), y mirar solo 'global' lo escondería."""
+    ks = _kill_switch(engine, redis_url)
+    with engine.connect() as conn:
+        scopes = ["global", *(sid for sid, _ in strategies(conn))]
+    return {scope: ks.state(scope) for scope in scopes}
+
+
+def kill_switch_state(engine: Engine, redis_url: str | None) -> KillSwitchState:
+    """Activo si lo está en cualquier scope. Las tres fuentes más config.json; sin Redis
+    configurado, esa fuente da error y cuenta como activa: el dashboard enseña lo mismo
+    que vería la estrategia."""
+    by_scope = kill_switch_by_scope(engine, redis_url)
+    reasons = list(by_scope["global"].reasons)
+    for scope, st in by_scope.items():
+        reasons += [f"{scope}: {r}" for r in st.reasons
+                    if scope != "global" and r not in by_scope["global"].reasons]
+    return KillSwitchState(active=bool(reasons), reasons=tuple(reasons))
+
+
+def last_kill_events(conn: Connection) -> dict[str, Any]:
+    """El último evento on/off de cada scope, con su motivo y quién lo puso."""
+    return {r.scope: r for r in conn.execute(text("""
+        SELECT DISTINCT ON (scope) scope, ts, kind, reason, actor FROM risk_events
+        WHERE kind IN ('kill_switch_on', 'kill_switch_off') ORDER BY scope, ts DESC, id DESC
+    """))}
 
 
 def live_trading() -> bool | None:
@@ -105,6 +131,8 @@ class StrategyPnl:
     n_fills: int = 0
     today_net: Decimal = ZERO
     n_registered: int = 0
+    unrealized: Decimal = ZERO          # del último snapshot de equity del sleeve
+    equity: Decimal | None = None       # ídem
 
     @property
     def net(self) -> Decimal:
@@ -113,6 +141,11 @@ class StrategyPnl:
     @property
     def net_after_ai(self) -> Decimal:
         return self.net - self.ai_cost
+
+    @property
+    def total(self) -> Decimal:
+        """Neto realizado tras IA más lo no realizado: lo que daría cerrar hoy."""
+        return self.net_after_ai + self.unrealized
 
 
 def pnl_by_strategy(conn: Connection, today: date | None = None) -> list[StrategyPnl]:
@@ -134,6 +167,13 @@ def pnl_by_strategy(conn: Connection, today: date | None = None) -> list[Strateg
     )):
         if sid in rows:
             rows[sid].n_registered = n
+    for r in conn.execute(text(
+        "SELECT DISTINCT ON (strategy_id) strategy_id, equity_usd, unrealized_pnl"
+        " FROM equity_curve ORDER BY strategy_id, ts DESC"
+    )):
+        if r.strategy_id in rows:
+            rows[r.strategy_id].unrealized = Decimal(str(r.unrealized_pnl))
+            rows[r.strategy_id].equity = Decimal(str(r.equity_usd))
     return list(rows.values())
 
 
@@ -147,6 +187,7 @@ def totals(rows: Sequence[StrategyPnl]) -> StrategyPnl:
         t.ai_cost += r.ai_cost
         t.n_fills += r.n_fills
         t.today_net += r.today_net
+        t.unrealized += r.unrealized
     return t
 
 
@@ -178,6 +219,7 @@ class EquityKpis:
     equity: float | None = None
     day_change: float | None = None
     drawdown: float | None = None        # máximo drawdown de la ventana, fracción negativa
+    drawdown_sleeve: str | None = None   # de qué sleeve es
 
 
 def equity_kpis(series: dict[str, list[tuple[datetime, float]]]) -> EquityKpis:
@@ -188,13 +230,19 @@ def equity_kpis(series: dict[str, list[tuple[datetime, float]]]) -> EquityKpis:
     first_today = [next((v for t, v in pts if t >= start_of_day), None) for pts in series.values()]
     day = (latest - sum(v for v in first_today if v is not None)
            if all(v is not None for v in first_today) else None)
-    curves = [[v for _, v in pts] for pts in series.values() if len(pts) > 1]
-    dd = min((max_drawdown(c) for c in curves), default=None)
-    return EquityKpis(equity=latest, day_change=day, drawdown=dd)
+    dds = {sid: max_drawdown([v for _, v in pts]) for sid, pts in series.items() if len(pts) > 1}
+    worst = min(dds, key=lambda k: dds[k], default=None)
+    return EquityKpis(equity=latest, day_change=day,
+                      drawdown=None if worst is None else dds[worst],
+                      drawdown_sleeve=worst if worst is not None and dds[worst] < 0 else None)
 
 
 def fills_on(conn: Connection, day: date) -> list[Fill]:
     return [f for f in fetch_fills(conn) if utc_day(f.ts) == day]
+
+
+def fills_since(conn: Connection, since: datetime) -> list[Fill]:
+    return [f for f in fetch_fills(conn) if f.ts >= since]
 
 
 def positions(conn: Connection) -> dict[Any, ViewPosition]:

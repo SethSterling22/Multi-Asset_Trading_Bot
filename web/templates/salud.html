@@ -1,11 +1,20 @@
 <div class="card">
-  <h2>Kill switch</h2>
-  {% if v.kill_switch.active %}
-    <p class="down">ACTIVO: no se abren posiciones nuevas.</p>
-    <ul class="reasons">{% for r in v.kill_switch.reasons %}<li>{{ r }}</li>{% endfor %}</ul>
-  {% else %}
-    <p class="up">Inactivo en las cuatro fuentes (risk_events, Redis, /run/trading/HALT, config.json).</p>
-  {% endif %}
+  <h2>Kill switch · por sleeve</h2>
+  <p class="hint">Activo si lo dice cualquiera de las cuatro fuentes (risk_events, Redis,
+    /run/trading/HALT, config.json). <b>global</b> para todo; cada sleeve puede estar parado por
+    separado, p.ej. por la reconciliación cuando el ledger y el venue no cuadran. Un sleeve parado
+    no envía órdenes hasta que alguien lo revise y lo levante (RUNNING.md §4b).</p>
+  <table>
+    <thead><tr><th>Scope</th><th>Estado</th><th>Fuentes</th><th>Último evento</th><th>Quién</th>
+      <th>Motivo</th></tr></thead>
+    <tbody>{% for scope, st in v.by_scope.items() %}{% set e = v.last_events.get(scope) %}
+      <tr><td>{{ scope }}</td>
+        <td class="{% if st.active %}down{% else %}up{% endif %}">{% if st.active %}PARADO{% else %}activo{% endif %}</td>
+        <td class="wrap mono">{{ st.reasons | join("; ") }}</td>
+        <td class="mono">{% if e %}{{ e.kind }} · {{ e.ts.strftime("%Y-%m-%d %H:%M") }} UTC{% else %}—{% endif %}</td>
+        <td>{{ e.actor if e else "" }}</td><td class="wrap">{{ e.reason if e else "" }}</td></tr>
+    {% endfor %}</tbody>
+  </table>
 </div>
 <div class="card">
   <h2>Archivo de Coinalyze · últimas 24 h</h2>
