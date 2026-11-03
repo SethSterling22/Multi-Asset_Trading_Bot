@@ -1,8 +1,9 @@
 """Adaptador de Lumibot + Alpaca para el Wheel. La lógica está en logic.py.
 
-Este fichero solo traduce: llamadas de Lumibot <-> el Protocol OptionsBroker,
-callbacks de fills -> ledger, y la equity del broker -> equity_curve (de donde
-salen la pérdida diaria y semanal). No contiene guards: los guards son de la base.
+Este fichero solo traduce: llamadas de Lumibot <-> el Protocol OptionsBroker y
+callbacks de fills -> ledger. La equity y la caja del Wheel salen de SU presupuesto
+(`WHEEL_BUDGET_USD`) y SUS fills, no de la cuenta del broker, que comparte con el
+sleeve cripto (accounting.py, D-016). No contiene guards: los guards son de la base.
 
 Ejecutar (paper por defecto):
 
@@ -36,16 +37,18 @@ from sqlalchemy import create_engine
 from core import log
 from core.config.models import CONFIG_PATH, TradingConfig
 from core.greeks import Right
-from core.ledger.equity import EquitySnapshot
+from core.ledger.equity import MissingMarkError, write_marks
 from core.ledger.fills import AssetType, Fill, Side, fetch_fills
 from risk.breakers import KillSwitch, file_source, redis_source, risk_events_source
 from strategies.base import (
     EquityCurveLossReference,
     ParamsLoader,
     PostgresLedger,
+    Rejected,
     config_kill_source,
 )
 from strategies.runtime import run_process
+from strategies.wheel.accounting import WheelBook, wheel_book
 from strategies.wheel.logic import (
     VENUE,
     OptionContract,
@@ -56,6 +59,7 @@ from strategies.wheel.logic import (
 )
 
 MARKET_TZ = ZoneInfo("America/New_York")   # el "día" de la pérdida diaria del Wheel
+BUDGET_ENV = "WHEEL_BUDGET_USD"
 SIDES = {s.value: s for s in Side}
 
 
@@ -79,15 +83,35 @@ class LumibotOptionsBroker(OptionsBroker):
 
     def __init__(self, strategy: Strategy) -> None:
         self.s = strategy
+        self._book: WheelBook | None = None
+
+    def set_book(self, book: WheelBook) -> None:
+        """La cuenta del Wheel de esta iteración: de ella salen cash() y portfolio_value()."""
+        self._book = book
+
+    def _current(self) -> WheelBook:
+        if self._book is None:
+            raise RuntimeError("sin la cuenta del Wheel calculada en esta iteración")
+        return self._book
+
+    def account_cash(self) -> Decimal:
+        """La caja real de la cuenta del broker: solo como tope de la del Wheel."""
+        return Decimal(str(self.s.get_cash() or 0))
+
+    def mark(self, symbol: str, asset_type: AssetType) -> Decimal | None:
+        """Precio de marca de una posición del ledger. Opciones: el mid, como al decidir."""
+        if asset_type is AssetType.OPTION:
+            return self.option_mid(OptionContract.from_occ(symbol))
+        return self.spot(symbol)
 
     def today(self) -> date:
         return datetime.now(MARKET_TZ).date()
 
     def cash(self) -> Decimal:
-        return Decimal(str(self.s.get_cash() or 0))
+        return self._current().cash
 
     def portfolio_value(self) -> Decimal:
-        return Decimal(str(self.s.get_portfolio_value() or 0))
+        return self._current().snapshot.equity_usd
 
     def spot(self, symbol: str) -> Decimal | None:
         return _dec(self.s.get_last_price(Asset(symbol, asset_type=Asset.AssetType.STOCK)))
@@ -156,11 +180,14 @@ class WheelStrategy(Strategy):  # type: ignore[misc]
     def initialize(self) -> None:
         self.sleeptime = "15M"
         engine = create_engine(os.environ["DATABASE_URL"])
+        self._engine = engine
+        self._budget = Decimal(os.environ[BUDGET_ENV])
+        self._broker = LumibotOptionsBroker(self)
         import redis
 
         params = ParamsLoader(CONFIG_PATH)
         self.logic = WheelLogic(
-            broker=LumibotOptionsBroker(self),
+            broker=self._broker,
             fills=lambda: self._wheel_fills(engine),
         )
         self.logic.setup_base(
@@ -183,13 +210,22 @@ class WheelStrategy(Strategy):  # type: ignore[misc]
             return fetch_fills(conn, strategy_id="wheel")
 
     def on_trading_iteration(self) -> None:
-        # El snapshot va ANTES del gate: es la referencia de la pérdida diaria, y
-        # tiene que existir aunque el proceso arranque a mitad de sesión.
-        value = Decimal(str(self.get_portfolio_value() or 0))
-        self.logic.record_equity(EquitySnapshot(
-            ts=datetime.now(UTC), strategy_id="wheel", equity_usd=value,
-            allocated_usd=value, gross_notional=Decimal(0), unrealized_pnl=Decimal(0),
-        ))
+        # La cuenta del Wheel y su snapshot van ANTES del gate: el snapshot es la
+        # referencia de la pérdida diaria, y tiene que existir aunque el proceso
+        # arranque a mitad de sesión.
+        now = datetime.now(UTC)
+        try:
+            book = wheel_book(self._wheel_fills(self._engine), budget=self._budget,
+                              account_cash=self._broker.account_cash(),
+                              mark=self._broker.mark, ts=now)
+        except MissingMarkError as exc:
+            # Sin precio de una posición abierta no hay equity: esta iteración no opera.
+            self.logic.reject(Rejected("no_mark", str(exc)), action="iteration")
+            return
+        self.logic.record_equity(book.snapshot)
+        with self._engine.begin() as conn:
+            write_marks(conn, ts=now, strategy_id="wheel", positions=book.positions)
+        self._broker.set_book(book)
         self.logic.run_iteration()
 
     def _record(self, order: Order, price: float, quantity: float, multiplier: float,
@@ -229,10 +265,15 @@ def main() -> None:
 
     load_dotenv()
     log.configure("wheel")
-    required = ("ALPACA_API_KEY", "ALPACA_API_SECRET", "DATABASE_URL", "REDIS_URL")
+    required = ("ALPACA_API_KEY", "ALPACA_API_SECRET", "DATABASE_URL", "REDIS_URL", BUDGET_ENV)
     missing = [k for k in required if not os.environ.get(k)]
     if missing:
         sys.exit(f"Faltan variables: {', '.join(missing)} (ver RUNNING.md §3 y §6).")
+    try:
+        if Decimal(os.environ[BUDGET_ENV]) <= 0:
+            raise ArithmeticError
+    except ArithmeticError:
+        sys.exit(f"{BUDGET_ENV} tiene que ser un número > 0 (el presupuesto del Wheel, D-016).")
 
     config = TradingConfig.load()
     is_paper = not config.system_status.live_trading_mode

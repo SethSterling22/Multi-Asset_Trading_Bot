@@ -116,7 +116,9 @@ def create_app(engine: Engine, *, redis_url: str | None,
     def header() -> dict[str, Any]:
         with engine.connect() as conn:
             ks = queries.kill_switch_state(engine, redis_url)
-            eq = queries.equity_kpis(queries.equity_series(conn, clock() - timedelta(days=30)))
+            since = clock() - timedelta(days=30)
+            eq = queries.equity_kpis(queries.equity_series(conn, since),
+                                     queries.pnl_curves(conn, since))
             pos = queries.positions(conn)
             pnl_total = queries.totals(queries.pnl_by_strategy(conn, clock().date()))
             last_run = queries.last_archive_run(conn)
