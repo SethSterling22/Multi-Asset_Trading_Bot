@@ -355,10 +355,33 @@ What each view is for (all times UTC):
 | Live | Each sleeve's equity over 7 days on its own scale, with ▼ at every fill; today's fills |
 | P&L por estrategia | Realized P&L since the start, gross → fees → funding → slippage → net, plus the unrealized P&L of open positions |
 | Historial | One row per day and sleeve: equity change split into realized net, change in unrealized, change in allocated capital (not a gain or loss), and "outside the ledger". Click a day for the price move of each open position (why the unrealized changed), its fills, orders (with rejection reasons), reconciliations, risk events and snapshots. CSV export: `/export/historial.csv`, `/export/fills.csv?day=YYYY-MM-DD` |
+| Diario | A TradeZella-style journal: P&L calendar by day with weekly totals, profit factor, win rate, average win/loss, max drawdown and recovery factor, balance against allocated capital, daily P&L and P&L by entry hour. Source: the real ledger (all sleeves or one, including `manual`) or a saved backtest run, always shown with its N and DSR. "+ Registrar operación manual" records trades made by hand in another account (setup below) |
 | Operaciones | Every entry paired with its exit (FIFO): price, amount paid and received (fees included), the reason the strategy gave for each order, net P&L and holding time. Open ones are valued at the last mark. CSV export: `/export/operaciones.csv` |
 | Mercado | The Coinalyze archive: open interest, funding, liquidations per venue |
 | Salud | Kill-switch state per scope, with the last event, who set it and why; archive coverage |
 | Riesgo | Open positions from the ledger and the risk-floor limits in force |
+
+#### Manual journal (optional, D-017)
+
+The Diario form records trades made **by hand in another account or broker**, as the
+`manual` sleeve: journal and statistics only, no reconciliation, no effect on the bot's
+accounts. It writes through its own database role, `manual_journal`, which Postgres
+lets insert only `manual` rows in `orders` and `fills` (row-level security). The rest
+of the dashboard keeps its read-only connection. To turn it on, on Sadida:
+```bash
+openssl rand -hex 24 > /etc/trading/pg_manual_password && chmod 444 /etc/trading/pg_manual_password
+```
+```bash
+echo "ALTER ROLE manual_journal LOGIN PASSWORD '$(cat /etc/trading/pg_manual_password)';" | $C exec -T postgres psql -U trading -d trading
+```
+```bash
+$C up -d --force-recreate dashboard
+```
+To keep it off, create the file empty instead (`install -m 444 /dev/null /etc/trading/pg_manual_password`):
+compose needs the file to exist, and an empty one disables the form.
+
+Backtest runs appear in Diario after the backtest is run again; every configuration of
+the sweep is saved with its fills, its N and its DSR.
 
 "Outside the ledger" is the part of a day's equity change that the sleeve's own fills do
 not explain. It should be ~0. Today it is not for the Wheel: it takes its equity from

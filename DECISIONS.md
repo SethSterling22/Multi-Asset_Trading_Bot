@@ -596,3 +596,34 @@ informe; aquí queda el resumen y la sección donde se justifica cada una.
 - **Efecto visible el día del cambio:** en Historial, el Wheel pasa de ~99 900 $ a 90 000 $
   con todo el cambio en "Δ asignado" y 0 en "fuera del ledger". La cabecera pasa a sumar
   90 000 $ + la equity del sleeve cripto.
+
+---
+
+## 2026-11-03 · D-017 · Diario tipo TradeZella, operaciones manuales y corridas de backtest guardadas
+
+- **Contexto:** el usuario quiere un dashboard como TradeZella para seguir ganancias y
+  pérdidas, para el backtest, y para registrar operaciones hechas a mano. Eligió: el
+  formulario **dentro del dashboard**; las operaciones manuales **en otra cuenta o broker**;
+  y ver las **corridas de backtest guardadas**.
+- **Decisiones:**
+  1. **El dashboard deja de ser 100 % de solo lectura, por un único camino.** El formulario
+     escribe con un rol propio, `manual_journal` (migración 0005), al que Postgres solo deja
+     INSERTAR filas de `strategy_id = 'manual'` en `orders` y `fills` (row-level security).
+     No puede actualizar ni borrar, ni tocar `risk_events` ni otro sleeve. Lo impone la base
+     de datos, no el código del dashboard. El resto del dashboard sigue con su conexión de
+     solo lectura. Sin `MANUAL_DATABASE_URL` el formulario está desactivado. Los POST
+     exigen Origin (o Referer) del mismo host. Hay que revisar antes de confirmar, y después
+     se redirige (Post/Redirect/Get).
+  2. **Lo manual no se reconcilia**: está en otra cuenta, sin venue con el que comparar. No
+     cuenta en el límite de posiciones del floor que enseña la cabecera, que es del bot.
+     Corregir un error es registrar la operación contraria: el ledger sigue append-only.
+  3. **Sin "puntuación" compuesta** (el "Zella score"): sus pesos serían números mágicos
+     (CLAUDE.md §1.9). Se enseñan sus componentes (profit factor, % de aciertos, ganancia y
+     pérdida media, drawdown, factor de recuperación), cada uno con su n.
+  4. **Backtest:** el CLI guarda cada configuración del barrido (`backtest_runs`,
+     `backtest_equity`, `backtest_fills`, con el motivo de cada operación) con el N
+     registrado y su DSR. El Diario nunca muestra su Sharpe, y siempre muestra N y DSR:
+     una corrida bonita elegida entre N es justo lo que el DSR deflacta (§1.11).
+  5. **P&L del día:** por defecto, el cambio de equity sin el de capital asignado (incluye las
+     posiciones abiertas). Opcionalmente, solo lo cerrado ese día. En un sleeve sin
+     snapshots (el manual) es lo realizado, y sin capital conocido no hay drawdown en %.

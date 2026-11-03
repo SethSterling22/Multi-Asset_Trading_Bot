@@ -7,6 +7,7 @@
 #   /etc/trading/              el directorio                           (root, 0700)
 #   /etc/trading/pg_password   contraseña de Postgres                  (root, 0444)
 #   /etc/trading/env           claves de PAPER de Alpaca y Coinalyze   (root, 0600)
+#   /etc/trading/pg_manual_password  rol del diario manual, D-017     (root, 0444; vacío = off)
 #   /etc/trading/compose.env   TRADING_DATA_DIR=/mnt/data/trading
 #
 # pg_password tiene que ser legible: fuera de Swarm, un secreto de compose es un
@@ -134,6 +135,20 @@ services:
   # necesita leer la base, y la conexión es read-only impuesta por el servidor.
   dashboard:
     <<: *app-db
+    # Además del secreto de la app, el del rol `manual_journal` (D-017): el formulario del
+    # diario manual escribe con él, y Postgres solo le deja insertar en el sleeve `manual`.
+    # Fichero vacío = formulario desactivado; el resto del dashboard sigue de solo lectura.
+    secrets: [pg_password, pg_manual_password]
+    entrypoint:
+      - sh
+      - -c
+      - >
+        export DATABASE_URL="postgresql+psycopg://trading:$$(cat $$PG_PASSWORD_FILE)@postgres:5432/trading"
+        REDIS_URL="redis://redis:6379/0";
+        if [ -s /run/secrets/pg_manual_password ]; then
+        export MANUAL_DATABASE_URL="postgresql+psycopg://manual_journal:$$(cat /run/secrets/pg_manual_password)@postgres:5432/trading";
+        fi; exec "$$@"
+      - app
     build:
       context: ..
       dockerfile: docker/Dockerfile.api
@@ -155,3 +170,5 @@ networks:
 secrets:
   pg_password:
     file: /etc/trading/pg_password
+  pg_manual_password:
+    file: /etc/trading/pg_manual_password

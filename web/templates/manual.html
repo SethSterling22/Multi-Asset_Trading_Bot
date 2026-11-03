@@ -1,0 +1,44 @@
+<div class="card">
+  <h2>Registrar operación manual</h2>
+  <p class="hint">Para operaciones hechas a mano en <b>otra cuenta o broker</b>: el sistema las guarda en el sleeve
+    <span class="mono">manual</span> para el diario y las estadísticas, sin reconciliarlas con ningún venue y sin
+    tocar las cuentas del bot. Una entrada es un fill: para cerrar una posición, registra la operación contraria.
+    El ledger es append-only: un error se corrige con la operación contraria, no editando.
+    <a href="/diario?sleeve=manual">← Volver al diario manual</a></p>
+  {% if not v.enabled %}<p class="down">Registro manual desactivado: falta MANUAL_DATABASE_URL (RUNNING.md, D-017).</p>{% endif %}
+  {% if v.errors %}<ul class="reasons">{% for e in v.errors %}<li>{{ e }}</li>{% endfor %}</ul>{% endif %}
+
+  {% set f = v.form %}
+  {% if v.preview %}{% set p = v.preview %}
+  <div class="banner">
+    <b>Revisa antes de registrar:</b> {{ p.side.value }} {{ p.qty | dec }} {{ p.symbol }} ({{ p.asset_type.value }})
+    a {{ p.price | money }}{% if p.multiplier != 1 %} × {{ p.multiplier | dec }}{% endif %} =
+    <b>{{ p.notional | money }}</b>, comisión {{ p.commission | money }}, en <span class="mono">{{ p.venue }}</span>,
+    el {{ p.ts.strftime("%Y-%m-%d %H:%M") }} UTC. Motivo: «{{ p.reason }}».
+  </div>
+  <form method="post" action="/diario/registrar" class="mform">
+    {% for k, val in f.items() %}<input type="hidden" name="{{ k }}" value="{{ val }}">{% endfor %}
+    <button type="submit" {% if not v.enabled %}disabled{% endif %}>Confirmar y registrar</button>
+  </form>
+  <form method="get" action="/diario/nueva" class="mform" style="margin-top:8px">
+    {% for k, val in f.items() %}<input type="hidden" name="{{ k }}" value="{{ val }}">{% endfor %}
+    <button type="submit" class="secondary">Corregir</button>
+  </form>
+  {% else %}
+  <form method="post" action="/diario/revisar" class="mform">
+    <label>Fecha <input type="date" name="fecha" value="{{ f.fecha }}" required></label>
+    <label>Hora <input type="time" name="hora" value="{{ f.hora }}" required></label>
+    <label>Zona <select name="zona">{% for z in v.zones %}<option {% if f.zona == z %}selected{% endif %}>{{ z }}</option>{% endfor %}</select></label>
+    <label>Cuenta / broker <input name="cuenta" value="{{ f.cuenta or '' }}" placeholder="webull" required maxlength="40"></label>
+    <label>Símbolo <input name="simbolo" value="{{ f.simbolo or '' }}" placeholder="AAPL, BTC/USD, SPY261218P00550000" required maxlength="40"></label>
+    <label>Tipo <select name="tipo">{% for t in v.types %}<option {% if f.tipo == t %}selected{% endif %}>{{ t }}</option>{% endfor %}</select></label>
+    <label>Lado <select name="lado">{% for s in v.sides %}<option {% if f.lado == s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></label>
+    <label>Cantidad <input name="cantidad" value="{{ f.cantidad or '' }}" inputmode="decimal" required></label>
+    <label>Precio <input name="precio" value="{{ f.precio or '' }}" inputmode="decimal" required></label>
+    <label>Comisión (USD) <input name="comision" value="{{ f.comision or '0' }}" inputmode="decimal"></label>
+    <label>Multiplicador <input name="multiplicador" value="{{ f.multiplicador or '' }}" placeholder="1; opciones: 100" inputmode="decimal"></label>
+    <label class="wide">Motivo <textarea name="motivo" maxlength="500" required placeholder="Por qué entras o sales: el setup, la señal, el plan">{{ f.motivo or '' }}</textarea></label>
+    <button type="submit">Revisar</button>
+  </form>
+  {% endif %}
+</div>

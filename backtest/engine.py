@@ -50,6 +50,20 @@ class Bar:
 Bars = Mapping[str, Sequence[Bar]]
 
 
+@dataclass(frozen=True, slots=True)
+class BacktestFill:
+    """Una operación simulada: precio con slippage, comisión en USD y el motivo del plan.
+    En una compra, `qty` es lo recibido: (nocional − comisión) / precio."""
+
+    ts: datetime
+    symbol: str
+    side: str
+    qty: float
+    price: float
+    commission: float
+    reason: str
+
+
 @dataclass(frozen=True)
 class BacktestResult:
     strategy_id: str
@@ -64,6 +78,8 @@ class BacktestResult:
     discarded: bool
     discard_reason: str | None = None
     extra: dict[str, Any] = field(default_factory=dict)
+    fills: tuple[BacktestFill, ...] = ()
+    final_marks: dict[str, float] = field(default_factory=dict)
 
     @property
     def sharpe_per_period(self) -> float | None:
@@ -86,29 +102,35 @@ class CostedSpotBroker(PaperSpotBroker):
         self.fees_usd = 0.0
         self.traded_usd = 0.0
         self.n_orders = 0
+        self.fills: list[BacktestFill] = []
+        self.now = datetime(1970, 1, 1, tzinfo=UTC)     # el motor lo fija en cada ejecución
 
     def set_prices(self, prices: Mapping[str, float]) -> None:
         self._prices = dict(prices)
 
-    def market_buy(self, symbol: str, notional_usd: float) -> str:
+    def market_buy(self, symbol: str, notional_usd: float, reason: str = "") -> str:
         # La comisión sale del nocional: con 100 USDC se compran 100·(1−fee) de activo.
         price = self._prices[symbol] * (1 + self.slip)
         if notional_usd > self._balances.get(STABLE_SYMBOL, 0.0) + 1e-9:
             raise ValueError(f"insufficient {STABLE_SYMBOL} for {notional_usd}")
         fee = notional_usd * self.fee
-        self._balances[symbol] = self._balances.get(symbol, 0.0) + (notional_usd - fee) / price
+        qty = (notional_usd - fee) / price
+        self._balances[symbol] = self._balances.get(symbol, 0.0) + qty
         self._balances[STABLE_SYMBOL] -= notional_usd
         self._account(notional_usd, fee)
+        self.fills.append(BacktestFill(self.now, symbol, "buy", qty, price, fee, reason))
         return f"bt-buy-{self.n_orders}"
 
-    def market_sell(self, symbol: str, quantity: float) -> str:
+    def market_sell(self, symbol: str, quantity: float, reason: str = "") -> str:
         if quantity > self._balances.get(symbol, 0.0) + 1e-12:
             raise ValueError(f"insufficient {symbol} for {quantity}")
-        proceeds = quantity * self._prices[symbol] * (1 - self.slip)
+        price = self._prices[symbol] * (1 - self.slip)
+        proceeds = quantity * price
         fee = proceeds * self.fee
         self._balances[symbol] -= quantity
         self._balances[STABLE_SYMBOL] = self._balances.get(STABLE_SYMBOL, 0.0) + proceeds - fee
         self._account(proceeds, fee)
+        self.fills.append(BacktestFill(self.now, symbol, "sell", quantity, price, fee, reason))
         return f"bt-sell-{self.n_orders}"
 
     def _account(self, notional: float, fee: float) -> None:
@@ -196,15 +218,17 @@ def run_crypto_rebalance(
             broker.set_prices(closes[t])
             orders = bot.plan()                       # decisión al cierre de t
             broker.set_prices(opens[t + 1])           # ejecución a la apertura de t+1
+            broker.now = datetime(days[t + 1].year, days[t + 1].month, days[t + 1].day,
+                                  tzinfo=UTC)
             for order in orders:
                 if order.side == "sell":
-                    broker.market_sell(order.symbol, order.quantity)
+                    broker.market_sell(order.symbol, order.quantity, reason=order.reason)
             for order in orders:
                 if order.side == "buy":
                     cash = broker.get_balances().get(STABLE_SYMBOL, 0.0)
                     notional = min(order.notional_usd, cash)
                     if notional > 0:
-                        broker.market_buy(order.symbol, notional)
+                        broker.market_buy(order.symbol, notional, reason=order.reason)
             equity.append(broker.value(closes[t + 1]))
 
     rets = returns(equity)
@@ -221,6 +245,8 @@ def run_crypto_rebalance(
         n_orders=broker.n_orders,
         discarded=discarded,
         discard_reason="retornos constantes: sin Sharpe definido" if discarded else None,
+        fills=tuple(broker.fills),
+        final_marks=dict(closes[-1]),
     )
     outcome = None if discarded else {
         "sharpe_per_period": result.sharpe_per_period,

@@ -19,6 +19,7 @@ from __future__ import annotations
 import csv
 import io
 from collections import defaultdict
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -125,17 +126,29 @@ def _orders(conn: Connection) -> dict[str, str | None]:
         text("SELECT client_order_id, reason FROM orders"))}
 
 
-def _latest_marks(conn: Connection) -> dict[tuple[str, str, str], Any]:
-    return {(r.strategy_id, r.venue, r.symbol): r for r in conn.execute(text("""
+# (sleeve, venue, símbolo) -> (hora, precio de marca)
+Marks = Mapping[tuple[str, str, str], tuple[datetime, Decimal]]
+
+
+def _latest_marks(conn: Connection) -> dict[tuple[str, str, str], tuple[datetime, Decimal]]:
+    return {(r.strategy_id, r.venue, r.symbol): (r.ts, Decimal(str(r.mark)))
+            for r in conn.execute(text("""
         SELECT DISTINCT ON (strategy_id, venue, symbol) strategy_id, venue, symbol, ts, mark
         FROM position_marks ORDER BY strategy_id, venue, symbol, ts DESC
     """))}
 
 
 def trades(conn: Connection, fills: list[Fill] | None = None) -> list[TradeRow]:
-    """Todas las operaciones, de la más reciente a la más antigua por hora de entrada."""
-    reasons = _orders(conn)
-    fills = sorted(fills if fills is not None else fetch_fills(conn), key=lambda f: f.ts)
+    """Las operaciones del ledger, de la más reciente a la más antigua."""
+    return pair_trades(fills if fills is not None else fetch_fills(conn),
+                       reasons=_orders(conn), marks=_latest_marks(conn))
+
+
+def pair_trades(fills: Sequence[Fill], *, reasons: Mapping[str, str | None],
+                marks: Marks) -> list[TradeRow]:
+    """El emparejamiento FIFO, sin base de datos: sirve igual para el ledger y para las
+    operaciones de una corrida de backtest. `reasons` va por client_order_id."""
+    fills = sorted(fills, key=lambda f: f.ts)
 
     def reason(coid: str | None) -> str:
         return (reasons.get(coid) if coid else None) or NO_REASON
@@ -184,13 +197,12 @@ def trades(conn: Connection, fills: list[Fill] | None = None) -> list[TradeRow]:
                 entry_ts=f.ts, entry_price=f.price, entry_reason=reason(f.client_order_id),
                 entry_order=f.client_order_id, entry_fees=fee_left), d))
 
-    marks = _latest_marks(conn)
     still_open = []
     for key, lots in books.items():
         m = marks.get(key)
         for lot in lots:
             if m is not None:
-                lot.row.mark, lot.row.mark_ts = Decimal(str(m.mark)), m.ts
+                lot.row.mark_ts, lot.row.mark = m
             still_open.append(lot.row)
     return sorted(still_open + closed, key=lambda t: (t.exit_ts or t.entry_ts, t.entry_ts),
                   reverse=True)

@@ -1,0 +1,134 @@
+<div class="card">
+  <form class="daynav" method="get" action="/diario">
+    <label>Fuente
+      <select name="fuente">
+        <option value="real" {% if v.fuente == "real" %}selected{% endif %}>Real (paper y manual)</option>
+        {% for key, label in v.runs %}<option value="{{ key }}" {% if v.fuente == key %}selected{% endif %}>Backtest {{ label }}</option>{% endfor %}
+      </select></label>
+    {% if v.fuente == "real" %}
+    <label>Sleeve
+      <select name="sleeve">
+        <option value="" {% if not v.sleeve %}selected{% endif %}>todos</option>
+        {% for s in v.sleeves %}<option value="{{ s }}" {% if v.sleeve == s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+      </select></label>
+    {% endif %}
+    <label>P&amp;L del día
+      <select name="modo">
+        <option value="equity" {% if v.mode == "equity" %}selected{% endif %}>cambio de equity</option>
+        <option value="realizado" {% if v.mode == "realizado" %}selected{% endif %}>solo cerradas</option>
+      </select></label>
+    <label>Mes <input type="month" name="mes" value="{{ '%04d-%02d' | format(v.year, v.month) }}"></label>
+    <button type="submit">IR</button>
+    <span class="spacer"></span>
+    {% if v.manual_enabled %}<a class="btn" href="/diario/nueva">+ Registrar operación manual</a>
+    {% else %}<span class="hint">Registro manual desactivado (falta MANUAL_DATABASE_URL, RUNNING.md)</span>{% endif %}
+  </form>
+  <p class="hint"><b>{{ v.source.label }}</b>.
+    {% if v.mode == "equity" %}El P&amp;L de cada día es su cambio de equity sin el de capital asignado:
+    incluye lo que suben o bajan las posiciones abiertas.{% else %}El P&amp;L de cada día es el neto de las
+    operaciones que se cerraron ese día.{% endif %} Días UTC. Sin "puntuación" compuesta: sus pesos serían
+    números mágicos (CLAUDE.md §1.9); aquí están sus componentes, cada uno con su n.</p>
+
+  {% set b = v.source.backtest %}
+  {% if b %}
+  <div class="banner">
+    <b>Corrida de backtest #{{ b.id }}</b> ({{ b.window_start }} → {{ b.window_end }}, capital {{ b.initial_capital | money }}):
+    una de <b>N = {{ b.n_trials }}</b> configuraciones probadas{% if b.is_candidate %}, la elegida como candidata{% endif %}.
+    <b>DSR {{ "%.3f" | format(b.dsr) if b.dsr is not none else "—" }}</b>: la probabilidad de que su Sharpe no sea
+    suerte, ya descontadas las N pruebas. Un calendario bonito de una corrida elegida entre N no es evidencia.
+    {% if b.discarded %}<span class="down">Descartada.</span>{% endif %}
+    <a href="/export/operaciones.csv?fuente={{ v.fuente }}">Sus operaciones en CSV</a>
+  </div>
+  {% endif %}
+
+  {% set s = v.stats %}
+  <div class="kpis" style="margin:12px 0 0">
+    <div class="kpi"><div class="lab">P&amp;L neto</div>
+      <div class="val {{ s.net_pnl | cls }}">{{ s.net_pnl | money }}</div><div class="sub">toda la ventana, sin depósitos</div></div>
+    <div class="kpi"><div class="lab">Balance</div><div class="val">{{ s.balance | money }}</div>
+      <div class="sub">equity al último cierre</div></div>
+    <div class="kpi"><div class="lab">Profit factor</div>
+      <div class="val">{{ "%.2f" | format(s.profit_factor) if s.profit_factor is not none else "—" }}</div>
+      <div class="sub">Σ ganancias / |Σ pérdidas| · n={{ s.n_closed }}</div></div>
+    <div class="kpi"><div class="lab">% aciertos</div>
+      <div class="val">{{ "%.1f%%" | format(s.win_rate * 100) if s.win_rate is not none else "—" }}</div>
+      <div class="sub"><span class="up">{{ s.n_wins }}</span> · {{ s.n_breakeven }} · <span class="down">{{ s.n_losses }}</span> cerradas</div></div>
+    <div class="kpi"><div class="lab">Ganancia / pérdida media</div>
+      <div class="val">{{ "%.2f" | format(s.win_loss_ratio) if s.win_loss_ratio is not none else "—" }}</div>
+      <div class="sub"><span class="up">{{ s.avg_win | money }}</span> / <span class="down">{{ s.avg_loss | money }}</span></div></div>
+    <div class="kpi"><div class="lab">Drawdown máx.</div>
+      <div class="val {{ s.max_drawdown_pct | cls }}">{{ s.max_drawdown_pct | pct }}</div>
+      <div class="sub">{{ s.max_drawdown_usd | money }}</div></div>
+    <div class="kpi"><div class="lab">Factor de recuperación</div>
+      <div class="val">{{ "%.2f" | format(s.recovery_factor) if s.recovery_factor is not none else "—" }}</div>
+      <div class="sub">P&amp;L neto / |drawdown $|</div></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="calhead">
+    <a href="/diario?{{ v.query_base }}&mes={{ v.prev }}">‹</a>
+    <h2>{{ v.month_name }}</h2>
+    <a href="/diario?{{ v.query_base }}&mes={{ v.next }}">›</a>
+    <span class="spacer"></span>
+    <span class="pill {% if v.month_pnl > 0 %}on{% elif v.month_pnl < 0 %}bad{% endif %}">{{ v.month_pnl | money }}</span>
+    <span class="pill">{{ v.month_days }} días</span>
+  </div>
+  <div class="cal">
+    {% for d in ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"] %}<div class="calh">{{ d }}</div>{% endfor %}
+    <div class="calh">Semana</div>
+    {% for w in v.weeks %}
+      {% for c in w.days %}
+        {% if c is none %}<div class="calc out"></div>
+        {% else %}
+        <a class="calc {% if c.pnl > 0.005 %}win{% elif c.pnl < -0.005 %}loss{% elif c.day in v.source.daily %}flat{% endif %}"
+           href="/historial?day={{ c.day.isoformat() }}" title="Ver el detalle del {{ c.day.isoformat() }}">
+          <span class="dnum">{{ c.day.day }}</span>
+          {% if c.day in v.source.daily %}
+            <span class="dval">{{ c.pnl | money }}</span>
+            <span class="dsub">{% if c.n_closed %}{{ c.n_closed }} cerr. · {{ "%.0f%%" | format(c.win_rate * 100) }}{% else %}sin cerradas{% endif %}</span>
+          {% endif %}
+        </a>
+        {% endif %}
+      {% endfor %}
+      <div class="calw"><span class="lab">Semana {{ loop.index }}</span>
+        <span class="dval {{ w.pnl | cls }}">{{ w.pnl | money }}</span><span class="dsub">{{ w.active }} días</span></div>
+    {% endfor %}
+  </div>
+  <p class="hint" style="margin-top:8px">Pulsa un día para ver en Historial qué pasó y por qué. En una corrida de
+    backtest los días llevan al historial real, no al de la corrida.</p>
+</div>
+
+<div class="grid2">
+  <div class="card"><h2>Balance y capital asignado</h2>
+    <p class="hint">La equity al cierre de cada día frente al capital asignado (el equivalente a depósitos y
+      retiros): la distancia entre las dos líneas es el P&amp;L.</p>
+    {{ v.balance_legend | safe }}{{ v.balance_svg | safe }}</div>
+  <div class="card"><h2>P&amp;L diario · últimos 60 días con actividad</h2>
+    <p class="hint">El mismo P&amp;L del calendario.</p>{{ v.daily_svg | safe }}</div>
+</div>
+<div class="card"><h2>P&amp;L por hora de entrada (UTC)</h2>
+  <p class="hint">Neto de las operaciones cerradas según la hora a la que se abrieron. Con pocas operaciones
+    no dice nada: mira el n de arriba.</p>{{ v.hour_svg | safe }}</div>
+
+<div class="card">
+  <h2>Operaciones · las 50 más recientes</h2>
+  <p class="hint">Cada entrada con su salida y sus motivos.
+    {% if v.fuente == "real" %}Todas, en <a href="/operaciones">Operaciones</a>.{% endif %}</p>
+  {% if v.recent_trades %}
+  <table>
+    <thead><tr><th>Estado</th><th>Sleeve</th><th>Símbolo</th><th>Entrada</th><th>Precio</th><th>Motivo de entrada</th>
+      <th>Salida</th><th>Precio</th><th>Motivo de salida</th><th>Neto</th><th>%</th></tr></thead>
+    <tbody>{% for t in v.recent_trades %}
+      <tr><td>{% if t.is_open %}abierta{% else %}cerrada{% endif %}</td><td>{{ t.strategy_id }}</td>
+        <td class="mono">{{ t.symbol }}</td><td class="mono">{{ t.entry_ts.strftime("%Y-%m-%d %H:%M") }}</td>
+        <td>{{ t.entry_price | money }}</td><td class="wrap">{{ t.entry_reason }}</td>
+        <td class="mono">{% if t.is_open %}—{% else %}{{ t.exit_ts.strftime("%Y-%m-%d %H:%M") }}{% endif %}</td>
+        <td>{{ t.exit_price_or_mark | money }}</td>
+        <td class="wrap">{% if t.is_open %}<span class="neu">sigue abierta</span>{% else %}{{ t.exit_reason }}{% endif %}</td>
+        <td class="{{ t.net_pnl | cls }}"><b>{{ t.net_pnl | money }}</b></td>
+        <td class="{{ t.return_pct | cls }}">{{ t.return_pct | pct }}</td></tr>
+    {% endfor %}</tbody>
+  </table>
+  {% else %}<p class="empty">Ninguna operación en esta fuente.</p>{% endif %}
+</div>
