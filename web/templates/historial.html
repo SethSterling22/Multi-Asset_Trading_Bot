@@ -1,0 +1,142 @@
+<div class="card">
+  <h2>Historial · qué pasó cada día</h2>
+  <p class="hint">Un día por fila y sleeve, en UTC. El cambio de equity se mide desde el cierre del día
+    anterior (su último snapshot) hasta el último snapshot del día, y se reparte en
+    <b>realizado neto</b> (fills cerrados, menos comisiones, más funding), <b>Δ no realizado</b>
+    (posiciones abiertas que suben o bajan de precio) y <b>fuera del ledger</b>: lo que no explican
+    las operaciones del sleeve. En el Wheel, que hoy toma la equity de la cuenta entera de Alpaca,
+    ahí cae todo lo que hace la cripto de esa misma cuenta.
+    Pulsa un día para ver su detalle. <a href="/export/historial.csv">Descargar CSV</a> ·
+    <a href="/export/fills.csv">todos los fills en CSV</a></p>
+  {% if v.rows %}
+  <table>
+    <thead><tr><th>Día</th><th>Sleeve</th><th>Apertura</th><th>Cierre</th><th>Cambio</th><th>%</th>
+      <th>Realizado neto</th><th>Δ no realizado</th><th>Fuera del ledger</th><th>Comisiones</th>
+      <th>Slippage</th><th>Fills</th><th>Órdenes</th><th>Rechazadas</th><th>Mismatches</th></tr></thead>
+    <tbody>{% for r in v.rows %}
+      <tr class="{% if r.day == v.day %}sel{% endif %}">
+        <td class="mono"><a href="/historial?day={{ r.day.isoformat() }}">{{ r.day.isoformat() }}</a></td>
+        <td>{{ r.strategy_id }}</td>
+        <td>{{ r.open_equity | money }}</td><td>{{ r.close_equity | money }}</td>
+        <td class="{{ r.change | cls }}">{{ r.change | money }}</td>
+        <td class="{{ r.change_pct | cls }}">{{ r.change_pct | pct }}</td>
+        <td class="{{ r.realized_net | cls }}">{{ r.realized_net | money }}</td>
+        <td class="{{ r.unrealized_change | cls }}">{{ r.unrealized_change | money }}</td>
+        <td class="{{ r.outside_ledger | cls }}">{{ r.outside_ledger | money }}</td>
+        <td>{{ r.fees | money }}</td><td>{{ r.slippage | money }}</td>
+        <td>{{ r.n_fills }}</td><td>{{ r.n_orders }}</td>
+        <td class="{% if r.n_rejected %}down{% endif %}">{{ r.n_rejected }}</td>
+        <td class="{% if r.mismatches %}down{% endif %}">{{ r.mismatches }}</td></tr>
+    {% endfor %}</tbody>
+  </table>
+  {% else %}<p class="empty">Sin actividad registrada todavía.</p>{% endif %}
+</div>
+
+{% if v.bars %}
+<div class="card">
+  <h2>Cambio de equity por día</h2>
+  <p class="hint">Un gráfico por sleeve, con su propia escala. Pasa el ratón por una barra para ver la cifra.</p>
+  <div class="grid2">{% for b in v.bars %}
+    <div><div class="sub-h">{{ b.sleeve }}</div>{{ b.svg | safe }}</div>{% endfor %}</div>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>Detalle del {{ v.day.isoformat() }}</h2>
+  <form class="daynav" method="get" action="/historial">
+    <a href="/historial?day={{ v.prev.isoformat() }}">← {{ v.prev.isoformat() }}</a>
+    <input type="date" name="day" value="{{ v.day.isoformat() }}"
+           {% if v.first %}min="{{ v.first.isoformat() }}"{% endif %} max="{{ v.today.isoformat() }}">
+    <button type="submit">IR</button>
+    {% if v.next <= v.today %}<a href="/historial?day={{ v.next.isoformat() }}">{{ v.next.isoformat() }} →</a>{% endif %}
+    <span class="spacer"></span>
+    <a href="/export/fills.csv?day={{ v.day.isoformat() }}">fills del día en CSV</a>
+  </form>
+
+  {% for r in v.day_rows %}{% if r.change is not none %}
+  <p class="hint"><b>{{ r.strategy_id }}</b>: {{ r.open_equity | money }} → {{ r.close_equity | money }}
+    (<span class="{{ r.change | cls }}">{{ r.change | money }}, {{ r.change_pct | pct }}</span>) =
+    realizado neto {{ r.realized_net | money }} + Δ no realizado {{ r.unrealized_change | money }}
+    + fuera del ledger {{ r.outside_ledger | money }}.</p>
+  {% endif %}{% endfor %}
+
+  <div class="sub-h">Equity del día · horas UTC · ▼ = un fill</div>
+  {% if v.charts %}<div class="grid2">{% for c in v.charts %}
+    <div><div class="sub-h">{{ c.sleeve }}</div>{{ c.svg | safe }}</div>{% endfor %}</div>
+  {% else %}<p class="empty">Sin snapshots de equity este día.</p>{% endif %}
+
+  <div class="sub-h">Movimientos (fills)</div>
+  {% if v.detail.fills %}
+  <table>
+    <thead><tr><th>Hora (UTC)</th><th>Sleeve</th><th>Símbolo</th><th>Lado</th><th>Cantidad</th>
+      <th>Precio</th><th>Nocional</th><th>Comisión</th><th>Slippage</th><th>Funding</th>
+      <th>Realizado</th><th>Orden</th></tr></thead>
+    <tbody>{% for f in v.detail.fills %}
+      <tr><td class="mono">{{ f.ts.strftime("%H:%M:%S") }}</td><td>{{ f.strategy_id }}</td>
+        <td class="mono">{{ f.symbol }}</td><td>{{ f.side }}</td><td>{{ f.qty | dec }}</td>
+        <td>{{ f.price | money }}</td><td>{{ f.notional | money }}</td><td>{{ f.commission | money }}</td>
+        <td class="{{ (-f.slippage) | cls }}">{{ f.slippage | money }}</td>
+        <td class="{{ f.funding | cls }}">{{ f.funding | money }}</td>
+        <td class="{{ f.realized | cls }}">{{ f.realized | money }}</td>
+        <td class="mono">{{ f.client_order_id or "—" }}</td></tr>
+    {% endfor %}</tbody>
+  </table>
+  {% else %}<p class="empty">Ningún fill este día.</p>{% endif %}
+
+  <div class="sub-h">Órdenes</div>
+  {% if v.detail.orders %}
+  <table>
+    <thead><tr><th>Hora (UTC)</th><th>Sleeve</th><th>Orden</th><th>Símbolo</th><th>Lado</th>
+      <th>Cantidad</th><th>Tipo</th><th>Estado</th><th>Motivo del rechazo</th></tr></thead>
+    <tbody>{% for o in v.detail.orders %}
+      <tr><td class="mono">{{ o.ts_intent.strftime("%H:%M:%S") }}</td><td>{{ o.strategy_id }}</td>
+        <td class="mono">{{ o.client_order_id }}</td><td class="mono">{{ o.symbol }}</td>
+        <td>{{ o.side }}</td><td>{{ o.qty | dec }}</td><td>{{ o.order_type }}</td>
+        <td class="{% if o.status in ('REJECTED', 'UNKNOWN') %}down{% elif o.status == 'FILLED' %}up{% endif %}">{{ o.status }}</td>
+        <td class="wrap">{{ o.reject_reason or "" }}</td></tr>
+    {% endfor %}</tbody>
+  </table>
+  {% else %}<p class="empty">Ninguna orden este día.</p>{% endif %}
+
+  <div class="sub-h">Reconciliaciones con el venue</div>
+  {% if v.detail.reconciliations %}
+  <table>
+    <thead><tr><th>Hora (UTC)</th><th>Venue</th><th>Sleeve</th><th>Mismatches</th><th>Acción</th>
+      <th>Detalle</th></tr></thead>
+    <tbody>{% for r in v.detail.reconciliations %}
+      <tr><td class="mono">{{ r.ts.strftime("%H:%M:%S") }}</td><td>{{ r.venue }}</td>
+        <td>{{ r.strategy_id or "—" }}</td>
+        <td class="{% if r.mismatches %}down{% else %}up{% endif %}">{{ r.mismatches }}</td>
+        <td>{{ r.action_taken }}</td>
+        <td class="wrap mono">{{ (r.detail or []) | join("; ") }}</td></tr>
+    {% endfor %}</tbody>
+  </table>
+  {% else %}<p class="empty">Ninguna reconciliación este día.</p>{% endif %}
+
+  <div class="sub-h">Eventos de riesgo</div>
+  {% if v.detail.risk_events %}
+  <table>
+    <thead><tr><th>Hora (UTC)</th><th>Evento</th><th>Scope</th><th>Quién</th><th>Motivo</th></tr></thead>
+    <tbody>{% for e in v.detail.risk_events %}
+      <tr><td class="mono">{{ e.ts.strftime("%H:%M:%S") }}</td>
+        <td class="{% if e.kind == 'kill_switch_on' %}down{% elif e.kind == 'kill_switch_off' %}up{% endif %}">{{ e.kind }}</td>
+        <td>{{ e.scope }}</td><td>{{ e.actor }}</td><td class="wrap">{{ e.reason }}</td></tr>
+    {% endfor %}</tbody>
+  </table>
+  {% else %}<p class="empty">Ningún evento de riesgo este día.</p>{% endif %}
+
+  {% if v.detail.snapshots %}
+  <details><summary class="sub-h">Snapshots de equity ({{ v.detail.snapshots | length }}) · pulsa para ver</summary>
+  <table>
+    <thead><tr><th>Hora (UTC)</th><th>Sleeve</th><th>Equity</th><th>Asignado</th><th>No realizado</th>
+      <th>Nocional bruto</th></tr></thead>
+    <tbody>{% for s in v.detail.snapshots %}
+      <tr><td class="mono">{{ s.ts.strftime("%H:%M:%S") }}</td><td>{{ s.strategy_id }}</td>
+        <td>{{ s.equity_usd | money }}</td><td>{{ s.allocated_usd | money }}</td>
+        <td class="{{ s.unrealized_pnl | cls }}">{{ s.unrealized_pnl | money }}</td>
+        <td>{{ s.gross_notional | money }}</td></tr>
+    {% endfor %}</tbody>
+  </table>
+  </details>
+  {% else %}<div class="sub-h">Snapshots de equity</div><p class="empty">Sin snapshots este día.</p>{% endif %}
+</div>

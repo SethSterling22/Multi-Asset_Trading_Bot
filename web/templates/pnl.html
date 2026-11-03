@@ -1,23 +1,30 @@
 <div class="card">
   <h2>P&amp;L por estrategia · desde el inicio</h2>
-  <p class="hint">neto = bruto − comisiones + funding − slippage; el bruto va a precios de decisión
-    (D-004). Mismo cálculo que <span class="mono">core/ledger/attribution.py</span>.</p>
+  <p class="hint">Lo <b>realizado</b>: neto = bruto − comisiones + funding − slippage, sobre posiciones
+    ya cerradas. El bruto va a precios de decisión (D-004): es lo que habrían dado las decisiones sin
+    el coste de ejecución, así que con posiciones abiertas y nada cerrado el bruto es solo el slippage
+    pagado al entrar y el neto es 0. Lo que suben o bajan las posiciones abiertas está en
+    <b>no realizado</b> (del último snapshot de equity). Mismo cálculo que
+    <span class="mono">core/ledger/attribution.py</span>.</p>
   <table>
     <thead><tr><th>Sleeve</th><th>Bruto</th><th>Comisiones</th><th>Funding</th><th>Slippage</th>
-      <th>Neto</th><th>Coste IA</th><th>Neto tras IA</th><th>Hoy</th><th>Fills</th><th>N backtest</th></tr></thead>
+      <th>Neto</th><th>Coste IA</th><th>Neto tras IA</th><th>No realizado</th><th>Total</th><th>Hoy</th><th>Fills</th><th>N backtest</th></tr></thead>
     <tbody>{% for r in v.rows %}
       <tr><td><span class="sname"><i style="background:var(--s{{ loop.index }})"></i>{{ r.name }}</span></td>
         <td>{{ r.gross | money }}</td><td>{{ r.fees | money }}</td>
         <td class="{{ r.funding | cls }}">{{ r.funding | money }}</td><td>{{ r.slippage | money }}</td>
         <td class="{{ r.net | cls }}">{{ r.net | money }}</td><td>{{ r.ai_cost | money }}</td>
         <td class="{{ r.net_after_ai | cls }}"><b>{{ r.net_after_ai | money }}</b></td>
+        <td class="{{ r.unrealized | cls }}">{{ r.unrealized | money }}</td>
+        <td class="{{ r.total | cls }}">{{ r.total | money }}</td>
         <td class="{{ r.today_net | cls }}">{{ r.today_net | money }}</td>
         <td>{{ r.n_fills }}</td><td>{{ r.n_registered or "—" }}</td></tr>
     {% endfor %}</tbody>
     <tfoot><tr><td>Total</td><td>{{ v.total.gross | money }}</td><td>{{ v.total.fees | money }}</td>
       <td>{{ v.total.funding | money }}</td><td>{{ v.total.slippage | money }}</td>
       <td>{{ v.total.net | money }}</td><td>{{ v.total.ai_cost | money }}</td>
-      <td>{{ v.total.net_after_ai | money }}</td><td>{{ v.total.today_net | money }}</td>
+      <td>{{ v.total.net_after_ai | money }}</td><td>{{ v.total.unrealized | money }}</td>
+      <td>{{ v.total.total | money }}</td><td>{{ v.total.today_net | money }}</td>
       <td>{{ v.total.n_fills }}</td><td></td></tr></tfoot>
   </table>
 </div>

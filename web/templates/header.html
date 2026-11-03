@@ -23,7 +23,7 @@
     <div class="sub">desde el primer snapshot del día</div></div>
   <div class="kpi"><div class="lab">Max drawdown 30 d</div>
     <div class="val {{ h.equity.drawdown | cls }}">{{ h.equity.drawdown | pct }}</div>
-    <div class="sub">peor sleeve</div></div>
+    <div class="sub">peor sleeve{% if h.equity.drawdown_sleeve %}: {{ h.equity.drawdown_sleeve }}{% endif %}</div></div>
   <div class="kpi"><div class="lab">Posiciones</div>
     <div class="val">{{ h.open_positions }} / {{ h.max_positions }}</div>
     <div class="sub">abiertas / máximo del floor</div></div>

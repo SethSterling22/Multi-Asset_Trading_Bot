@@ -8,8 +8,10 @@ no envía nada. Pasar a enviar órdenes (aunque sean de paper) es un acto explí
 Cada ciclo (una hora):
   1. reconciliación contra el venue: con cualquier mismatch o el venue sin
      responder, el ciclo no opera (y un mismatch activa el kill switch);
-  2. snapshot de equity del sleeve, que es la referencia de la pérdida diaria;
-  3. plan del rebalanceador (gate común incluido) y órdenes por el router.
+  2. snapshot de equity del sleeve, que es la referencia de la pérdida diaria. Se
+     escribe aunque el ciclo no opere (sleeve parado), para que el historial siga;
+  3. plan del rebalanceador (gate común incluido) y órdenes por el router, y otro
+     snapshot si ha habido fills.
 
 El sleeve tiene presupuesto propio (`CRYPTO_BUDGET_USD`): su caja es el
 presupuesto más el flujo de caja de SUS fills, no la caja de la cuenta, que en
@@ -27,13 +29,13 @@ import os
 import sys
 import threading
 from collections.abc import Callable, Mapping
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import ROUND_DOWN, Decimal
 from typing import Any
 
 from sqlalchemy import Engine, create_engine
 
-from brokers.base import Quote, SpotVenue, normalize_symbol
+from brokers.base import Quote, SpotVenue, VenueUnavailableError, normalize_symbol
 from core import log
 from core.ledger.equity import snapshot
 from core.ledger.fills import AssetType, Fill, fetch_fills
@@ -224,19 +226,37 @@ def run_cycle(
     now: datetime,
     record_equity: Callable[..., Any],
     logger: Any,
+    clock: Callable[[], datetime] = lambda: datetime.now(UTC),
 ) -> list[str]:
     report = reconcile(engine, venue, router, strategy_id=STRATEGY_ID, logger=logger)
+
+    def write_snapshot(ts: datetime) -> None:
+        with engine.connect() as conn:
+            fills = fetch_fills(conn, STRATEGY_ID)
+        record_equity(snapshot(fills, strategy_id=STRATEGY_ID, allocated_usd=budget_usd,
+                               marks=broker.marks(), ts=ts))
+
+    # El snapshot va aunque el ciclo no opere: con el sleeve parado sus posiciones siguen
+    # moviéndose de precio, y el historial tiene que verlo.
+    broker.begin(now)
+    try:
+        write_snapshot(now)
+    except VenueUnavailableError as exc:
+        logger.error("cycle_skipped", strategy_id=STRATEGY_ID, action="skip",
+                     reason=f"sin precios del venue: {exc}"[:300])
+        return []
     if not report.ok:
         logger.error("cycle_skipped", strategy_id=STRATEGY_ID, action="skip",
                      reason=f"reconciliación: {len(report.mismatches)} mismatches, "
                             f"{report.unreachable} sin respuesta")
         return []
-    broker.begin(now)
-    with engine.connect() as conn:
-        fills = fetch_fills(conn, STRATEGY_ID)
-    record_equity(snapshot(fills, strategy_id=STRATEGY_ID, allocated_usd=budget_usd,
-                           marks=broker.marks(), ts=now))
-    return [oid for oid in bot.execute(dry_run=broker.dry_run) if oid]
+    ids = [oid for oid in bot.execute(dry_run=broker.dry_run) if oid]
+    if ids:
+        # Y otro tras operar, para que la equity del día refleje los fills de este ciclo.
+        after = max(clock(), now + timedelta(microseconds=1))
+        broker.begin(after)
+        write_snapshot(after)
+    return ids
 
 
 def _env_decimal(env: Mapping[str, str], name: str) -> Decimal:

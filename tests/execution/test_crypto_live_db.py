@@ -105,7 +105,11 @@ def test_first_cycle_buys_to_target_within_the_sleeve_budget(engine: Engine) -> 
     for symbol in ("BTC/USD", "ETH/USD"):
         assert D(1990) < value(fills, symbol) <= D(2000)
     assert sleeve_cash(fills, BUDGET) >= D(6000)
-    assert sleeve.count("equity_curve") == 1
+    # Un snapshot antes de operar y otro después, ya con las posiciones.
+    with engine.connect() as conn:
+        snaps = conn.execute(text(
+            "SELECT gross_notional FROM equity_curve ORDER BY ts")).scalars().all()
+    assert snaps[0] == 0 and snaps[1] > 3900
     assert sleeve.count("reconciliation_runs") == 1
 
 
@@ -154,6 +158,8 @@ def test_mismatch_skips_the_cycle_and_halts(engine: Engine) -> None:
     assert sleeve.cycle() == []
     assert venue.submits == 0
     assert risk_events_source(engine)(STRATEGY_ID) is True
+    # Parado, pero la equity se sigue registrando: el historial no se queda en blanco.
+    assert sleeve.count("equity_curve") == 1
 
 
 def test_proposed_state_reflects_the_order(engine: Engine) -> None:

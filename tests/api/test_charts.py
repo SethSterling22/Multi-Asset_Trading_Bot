@@ -38,8 +38,43 @@ def test_degenerate_inputs() -> None:
 
 
 def axis_labels(svg: str) -> list[str]:
+    """Las etiquetas del eje Y: las que están a la izquierda del área del gráfico."""
     return [t.text or "" for t in parse(svg).findall("{http://www.w3.org/2000/svg}text")
-            if t.get("text-anchor") == "end"]
+            if float(t.get("x", "0")) < 64]
+
+
+def x_labels(svg: str) -> list[tuple[str, str]]:
+    return [(t.text or "", t.get("text-anchor", "")) for t in
+            parse(svg).findall("{http://www.w3.org/2000/svg}text") if float(t.get("x", "0")) >= 64]
+
+
+def test_x_axis_is_utc_shows_the_date_once_and_stays_inside() -> None:
+    pts = [(T + timedelta(hours=h), 1.0 + h) for h in range(0, 9)]
+    labels = x_labels(line_chart({"s": pts}))
+    assert labels[0] == ("02 Nov 00:00", "start")           # T es medianoche UTC
+    assert labels[-1] == ("08:00", "end")
+    assert all(":" in text and "Nov" not in text for text, _ in labels[1:])
+
+
+def test_x_axis_repeats_the_date_when_the_day_changes() -> None:
+    pts = [(T + timedelta(hours=h), 1.0) for h in (0, 48)]
+    texts = [t for t, _ in x_labels(line_chart({"s": pts}))]
+    assert texts[0].startswith("02 Nov") and texts[-1].startswith("04 Nov")
+
+
+def test_markers_are_drawn_with_their_text() -> None:
+    svg = line_chart({"s": [(T, 1.0), (T + timedelta(hours=2), 2.0)]},
+                     markers=[(T + timedelta(hours=1), "buy <BTC>")])
+    root = parse(svg)
+    assert len(root.findall("{http://www.w3.org/2000/svg}line[@class='mk']")) == 1
+    assert "buy &lt;BTC&gt;" in svg
+
+
+def test_bars_are_green_up_and_red_down() -> None:
+    from api.charts import CRITICAL, GOOD, bars
+    rects = parse(bars([("a", 5.0), ("b", -3.0)])).findall("{http://www.w3.org/2000/svg}rect")
+    assert [r.get("fill") for r in rects] == [GOOD, CRITICAL]
+    assert "Sin datos" in bars([])
 
 
 def test_flat_equity_does_not_repeat_axis_labels() -> None:
@@ -84,3 +119,10 @@ def test_waterfall_uses_the_given_money_format() -> None:
     from api.app import money
     svg = waterfall([("Bruto", 10.0), ("Comisiones", -12.0), ("Neto", -2.0)], money=money)
     assert "−$12.00" in svg and "$-" not in svg
+
+
+def test_money_never_prints_a_signed_zero() -> None:
+    from api.app import money, signed_class
+    assert money(-0.0000001) == money(-0.0) == money(0.004) == "$0.00"
+    assert money(-0.006) == "−$0.01"
+    assert signed_class(-0.001) == signed_class(0.001) == "neu"
