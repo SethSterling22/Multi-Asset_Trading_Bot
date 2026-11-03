@@ -37,7 +37,7 @@ from sqlalchemy import Engine, create_engine
 
 from brokers.base import Quote, SpotVenue, VenueUnavailableError, normalize_symbol
 from core import log
-from core.ledger.equity import snapshot
+from core.ledger.equity import snapshot, write_marks
 from core.ledger.fills import AssetType, Fill, fetch_fills
 from core.risk_floor import floor_hash
 from execution.idempotency import OrderIntent, client_order_id
@@ -135,6 +135,11 @@ class RoutedSpotBroker:
         return {(f.venue, f.symbol): self._quote(f.symbol).mid for f in self._fills
                 if held.get(normalize_symbol(f.symbol), ZERO) != 0}
 
+    def open_positions(self) -> dict[tuple[str, str], tuple[Decimal, Decimal]]:
+        """(venue, symbol) -> (cantidad, precio de marca) de cada posición abierta."""
+        held = self._held()
+        return {key: (held[normalize_symbol(key[1])], mark) for key, mark in self.marks().items()}
+
     def _quote(self, symbol: str) -> Quote:
         pair = self._pair(symbol)
         if pair not in self._quotes:
@@ -151,7 +156,7 @@ class RoutedSpotBroker:
     def get_price_usd(self, symbol: str) -> float:
         return float(self._quote(symbol).mid)
 
-    def market_buy(self, symbol: str, notional_usd: float) -> str:
+    def market_buy(self, symbol: str, notional_usd: float, reason: str = "") -> str:
         quote = self._quote(symbol)
         notional = Decimal(str(notional_usd))
         venue_cash = self._venue.cash()
@@ -162,13 +167,13 @@ class RoutedSpotBroker:
                               symbol=symbol, action="cap",
                               reason=f"{notional} > caja del venue {venue_cash}")
             notional = venue_cash
-        return self._submit(symbol, "buy", notional / quote.ask)
+        return self._submit(symbol, "buy", notional / quote.ask, reason)
 
-    def market_sell(self, symbol: str, quantity: float) -> str:
-        return self._submit(symbol, "sell", Decimal(str(quantity)))
+    def market_sell(self, symbol: str, quantity: float, reason: str = "") -> str:
+        return self._submit(symbol, "sell", Decimal(str(quantity)), reason)
 
     # -- una orden ---------------------------------------------------------------
-    def _submit(self, symbol: str, side: str, raw_qty: Decimal) -> str:
+    def _submit(self, symbol: str, side: str, raw_qty: Decimal, reason: str = "") -> str:
         pair = self._pair(symbol)
         rules = self._venue.rules(pair)
         qty = floor_to(raw_qty, rules.qty_increment)
@@ -184,7 +189,7 @@ class RoutedSpotBroker:
             client_order_id=client_order_id(STRATEGY_ID, pair, self._bar),
             venue=self._venue.name, symbol=pair, asset_type=AssetType.CRYPTO_SPOT,
             side=side, qty=qty, strategy_id=STRATEGY_ID, decision_price=mid,
-            risk_floor_hash=self._floor_hash,
+            risk_floor_hash=self._floor_hash, reason=reason or None,
         )
         if self._dry_run:
             self._log.info("order_dry_run", strategy_id=STRATEGY_ID, symbol=pair,
@@ -235,6 +240,9 @@ def run_cycle(
             fills = fetch_fills(conn, STRATEGY_ID)
         record_equity(snapshot(fills, strategy_id=STRATEGY_ID, allocated_usd=budget_usd,
                                marks=broker.marks(), ts=ts))
+        # Y el precio de cada posición: con él, el historial dice qué símbolo se movió.
+        with engine.begin() as conn:
+            write_marks(conn, ts=ts, strategy_id=STRATEGY_ID, positions=broker.open_positions())
 
     # El snapshot va aunque el ciclo no opere: con el sleeve parado sus posiciones siguen
     # moviéndose de precio, y el historial tiene que verlo.

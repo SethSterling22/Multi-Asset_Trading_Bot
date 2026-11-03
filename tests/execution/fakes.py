@@ -9,11 +9,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from decimal import Decimal
+from decimal import ROUND_CEILING, Decimal
 from typing import Literal
 
 from brokers.base import (
     AssetRules,
+    Execution,
     OrderStatus,
     Quote,
     VenueOrder,
@@ -42,6 +43,12 @@ class FakeVenue:
     lookup_down: bool = False
     positions_down: bool = False
     leave_open: bool = False            # la orden queda NEW y no se llena
+    # Como Alpaca (D-015): en una compra se queda esta fracción del activo recibido,
+    # hacia arriba a 1e-9, y la orden informa la cantidad bruta.
+    fee_rate: Decimal = Decimal(0)
+    executed: dict[str, list[Execution]] = field(default_factory=dict)
+    # Simula el router de antes de D-015: no informa la comisión en la orden.
+    hide_fees: bool = False
 
     def _mid(self, symbol: str) -> Decimal:
         return self.prices[normalize_symbol(symbol)]
@@ -63,10 +70,15 @@ class FakeVenue:
                                D(0), None)
         else:
             sign = 1 if side == "buy" else -1
-            self.held[key] = self.held.get(key, D(0)) + sign * qty
+            fee = ((qty * self.fee_rate).quantize(D("1e-9"), rounding=ROUND_CEILING)
+                   if side == "buy" and self.fee_rate else D(0))
+            self.held[key] = self.held.get(key, D(0)) + sign * qty - fee
             self.cash_usd -= sign * qty * price
-            order = VenueOrder(client_order_id, f"v-{len(self.orders) + 1}", OrderStatus.FILLED,
-                               qty, price, datetime.now(UTC))
+            venue_id = f"v-{len(self.orders) + 1}"
+            self.executed[venue_id] = [Execution(qty, price)]
+            order = VenueOrder(client_order_id, venue_id, OrderStatus.FILLED,
+                               qty, price, datetime.now(UTC),
+                               fee_qty=D(0) if self.hide_fees else fee)
         self.orders[client_order_id] = order
         if self.submit_fault == "timeout_after":
             raise VenueUnavailableError("ReadTimeout after the venue accepted it")
@@ -89,6 +101,9 @@ class FakeVenue:
         mid = self._mid(symbol)
         half = mid * self.spread / 2
         return Quote(bid=mid - half, ask=mid + half)
+
+    def executions(self, venue_order_id: str) -> list[Execution]:
+        return self.executed[venue_order_id]
 
     def rules(self, symbol: str) -> AssetRules:
         return AssetRules(min_order_qty=D("0.0001"), qty_increment=D("0.000001"))

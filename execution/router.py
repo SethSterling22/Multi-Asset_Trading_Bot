@@ -61,13 +61,22 @@ class RouteResult:
 def fill_from(symbol: str, asset_type: AssetType, strategy_id: str, side: str,
               decision_price: Decimal | None, venue: str, order: VenueOrder,
               fallback_ts: datetime) -> Fill:
-    """El fill agregado de una orden terminada. Comisión 0: ver DECISIONS.md D-014."""
+    """El fill agregado de una orden terminada, neto de comisiones (DECISIONS.md D-015).
+
+    Una comisión en especie reduce lo que llega a la cuenta: el fill registra esa
+    cantidad neta, y la comisión en dólares es su valor al precio del fill. El flujo de
+    caja queda igual a lo pagado de verdad (filled_qty · price).
+    """
     if order.filled_avg_price is None:
         raise ValueError(f"{order.client_order_id}: orden con qty llena y sin precio medio")
+    qty = order.filled_qty - order.fee_qty
+    if qty < 0:
+        raise ValueError(f"{order.client_order_id}: comisión mayor que la cantidad llena")
     return Fill(
         ts=order.filled_at or fallback_ts, venue=venue, symbol=symbol, asset_type=asset_type,
-        side=Side(side), qty=order.filled_qty, price=order.filled_avg_price,
-        commission=Decimal(0), decision_price=decision_price, strategy_id=strategy_id,
+        side=Side(side), qty=qty, price=order.filled_avg_price,
+        commission=order.fee_qty * order.filled_avg_price + order.fee_usd,
+        decision_price=decision_price, strategy_id=strategy_id,
         venue_fill_id=order.venue_order_id, client_order_id=order.client_order_id,
     )
 

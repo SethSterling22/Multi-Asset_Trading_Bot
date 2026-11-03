@@ -1,0 +1,49 @@
+<div class="card">
+  <h2>Operaciones · cada entrada con su salida</h2>
+  <p class="hint">Reconstruidas de los fills en FIFO por sleeve y símbolo: cada fila es un tramo que se
+    abrió con una orden y se cerró con otra, o que sigue abierto. <b>Pagado</b> = cantidad · precio de
+    entrada + su comisión; <b>cobrado</b> = cantidad · precio de salida − su comisión; neto = cobrado −
+    pagado. El <b>motivo</b> es el que dio la estrategia al decidir la orden. En las abiertas, la
+    salida es el último precio de marca registrado: lo que valdría cerrarla ahora, sin la comisión de
+    cerrarla; no es una operación hecha. Horas UTC.
+    <a href="/export/operaciones.csv">Descargar CSV</a></p>
+  <div class="kpis" style="margin:0 0 14px">
+    <div class="kpi"><div class="lab">Abiertas</div><div class="val">{{ v.totals.n_open }}</div>
+      <div class="sub">pagado {{ v.totals.paid_open | money }}</div></div>
+    <div class="kpi"><div class="lab">Valen ahora</div><div class="val">{{ v.totals.value_open | money }}</div>
+      <div class="sub">al último precio de marca</div></div>
+    <div class="kpi"><div class="lab">Neto abiertas</div>
+      <div class="val {{ v.totals.net_open | cls }}">{{ v.totals.net_open | money }}</div>
+      <div class="sub">no realizado − comisiones</div></div>
+    <div class="kpi"><div class="lab">Cerradas</div><div class="val">{{ v.totals.n_closed }}</div>
+      <div class="sub">tramos de lote</div></div>
+    <div class="kpi"><div class="lab">Neto cerradas</div>
+      <div class="val {{ v.totals.net_closed | cls }}">{{ v.totals.net_closed | money }}</div>
+      <div class="sub">realizado − comisiones</div></div>
+    <div class="kpi"><div class="lab">Comisiones</div><div class="val">{{ v.totals.fees | money }}</div>
+      <div class="sub">todas las operaciones</div></div>
+  </div>
+  {% if v.trades %}
+  <table>
+    <thead><tr><th>Estado</th><th>Sleeve</th><th>Símbolo</th><th>Lado</th><th>Cantidad</th>
+      <th>Entrada</th><th>Precio entrada</th><th>Pagado</th><th>Motivo de entrada</th>
+      <th>Salida</th><th>Precio salida</th><th>Cobrado</th><th>Motivo de salida</th>
+      <th>Comisiones</th><th>Bruto</th><th>Neto</th><th>%</th></tr></thead>
+    <tbody>{% for t in v.trades %}
+      <tr><td class="{% if t.is_open %}neu{% endif %}">{% if t.is_open %}abierta{% else %}cerrada{% endif %}</td>
+        <td>{{ t.strategy_id }}</td><td class="mono">{{ t.symbol }}</td><td>{{ t.direction }}</td>
+        <td>{{ t.qty | dec }}</td>
+        <td class="mono">{{ t.entry_ts.strftime("%Y-%m-%d %H:%M") }}</td>
+        <td>{{ t.entry_price | money }}</td><td>{{ t.entry_amount | money }}</td>
+        <td class="wrap">{{ t.entry_reason }}</td>
+        <td class="mono">{% if t.is_open %}{% if t.mark_ts %}ahora ({{ t.mark_ts.strftime("%m-%d %H:%M") }}){% else %}—{% endif %}{% else %}{{ t.exit_ts.strftime("%Y-%m-%d %H:%M") }}{% endif %}</td>
+        <td>{{ t.exit_price_or_mark | money }}</td><td>{{ t.exit_amount | money }}</td>
+        <td class="wrap">{% if t.is_open %}<span class="neu">sigue abierta</span>{% else %}{{ t.exit_reason }}{% endif %}</td>
+        <td>{{ t.fees | money }}</td>
+        <td class="{{ t.gross_pnl | cls }}">{{ t.gross_pnl | money }}</td>
+        <td class="{{ t.net_pnl | cls }}"><b>{{ t.net_pnl | money }}</b></td>
+        <td class="{{ t.return_pct | cls }}">{{ t.return_pct | pct }}</td></tr>
+    {% endfor %}</tbody>
+  </table>
+  {% else %}<p class="empty">Ninguna operación todavía.</p>{% endif %}
+</div>

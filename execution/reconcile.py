@@ -46,6 +46,22 @@ class ReconcileReport:
         return not self.mismatches and not self.unreachable
 
 
+def position_mismatches(engine: Engine, venue_name: str, strategy_id: str,
+                        remote: dict[str, Decimal]) -> list[str]:
+    """Posición del ledger (vista `positions`) contra la del venue, símbolo a símbolo."""
+    remote = {normalize_symbol(s): q for s, q in remote.items()}
+    with engine.connect() as conn:
+        ledger = {normalize_symbol(k.symbol): p.net_qty
+                  for k, p in load_positions_view(conn).items()
+                  if k.venue == venue_name and k.strategy_id == strategy_id}
+    out = []
+    for sym in sorted(set(ledger) | set(remote)):
+        mine, theirs = ledger.get(sym, Decimal(0)), remote.get(sym, Decimal(0))
+        if abs(mine - theirs) > QTY_TOLERANCE:
+            out.append(f"{sym}: ledger {mine} ≠ venue {theirs}")
+    return out
+
+
 def _kill_switch_on(conn: Any, strategy_id: str) -> bool:
     kind = conn.execute(text("""
         SELECT kind FROM risk_events WHERE scope = :s
@@ -90,19 +106,12 @@ def reconcile(
     # 2. Posición del ledger contra la del venue.
     if not report.unreachable:
         try:
-            remote_pos = {normalize_symbol(s): q for s, q in venue.positions().items()}
+            remote_pos = venue.positions()
         except VenueUnavailableError:
             report.unreachable += 1
             remote_pos = None
         if remote_pos is not None:
-            with engine.connect() as conn:
-                ledger = {normalize_symbol(k.symbol): p.net_qty
-                          for k, p in load_positions_view(conn).items()
-                          if k.venue == venue.name and k.strategy_id == strategy_id}
-            for sym in sorted(set(ledger) | set(remote_pos)):
-                mine, theirs = ledger.get(sym, Decimal(0)), remote_pos.get(sym, Decimal(0))
-                if abs(mine - theirs) > QTY_TOLERANCE:
-                    report.mismatches.append(f"{sym}: ledger {mine} ≠ venue {theirs}")
+            report.mismatches += position_mismatches(engine, venue.name, strategy_id, remote_pos)
 
     # 3. Registro y, si no cuadra, modo seguro.
     action = "safe_mode" if report.mismatches else "none"

@@ -99,3 +99,21 @@ def write_snapshot(conn: Connection, snap: EquitySnapshot) -> bool:
         },
     ).first()
     return row is not None
+
+
+def write_marks(conn: Connection, *, ts: datetime, strategy_id: str,
+                positions: Mapping[tuple[str, str], tuple[Decimal, Decimal]]) -> int:
+    """Cantidad y precio de marca de cada posición abierta, junto al snapshot de `ts`.
+
+    `positions` va indexado por (venue, symbol) -> (qty, mark). Reescribir el mismo
+    instante es un no-op, como el snapshot.
+    """
+    written = 0
+    for (venue, symbol), (qty, mark) in positions.items():
+        row = conn.execute(text("""
+            INSERT INTO position_marks (ts, strategy_id, venue, symbol, qty, mark)
+            VALUES (:ts, :s, :v, :sym, :q, :m)
+            ON CONFLICT DO NOTHING RETURNING ts
+        """), {"ts": ts, "s": strategy_id, "v": venue, "sym": symbol, "q": qty, "m": mark}).first()
+        written += row is not None
+    return written

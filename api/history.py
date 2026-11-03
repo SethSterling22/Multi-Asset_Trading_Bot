@@ -184,6 +184,7 @@ class FillRow:
     funding: Decimal
     realized: Decimal
     client_order_id: str | None
+    kind: str = "fill"              # 'fee_in_kind': corrección de comisión en especie (D-015)
 
 
 @dataclass
@@ -205,7 +206,8 @@ def _fill_rows(conn: Connection, start: datetime | None = None,
                 side=f.side.value, qty=f.qty, price=f.price,
                 notional=f.qty * f.price * f.multiplier, commission=f.commission,
                 slippage=slippage(f), funding=f.funding_payment, realized=fp.realized_pnl,
-                client_order_id=f.client_order_id)
+                client_order_id=f.client_order_id,
+                kind="fee_in_kind" if f.venue_fill_id.endswith(":fee") else "fill")
         for fp in per_fill
         if (f := fp.fill) and (start is None or f.ts >= start) and (end is None or f.ts < end)
     ]
@@ -258,8 +260,8 @@ def activity_days(conn: Connection) -> tuple[date | None, date | None]:
 HISTORY_COLUMNS = ("day", "strategy_id", "open_equity", "close_equity", "change", "change_pct",
                    "realized_net", "unrealized_change", "outside_ledger", "fees", "funding",
                    "slippage", "n_fills", "n_orders", "n_rejected", "n_snapshots", "mismatches")
-FILL_COLUMNS = ("ts", "strategy_id", "venue", "symbol", "side", "qty", "price", "notional",
-                "commission", "slippage", "funding", "realized", "client_order_id")
+FILL_COLUMNS = ("ts", "strategy_id", "venue", "symbol", "kind", "side", "qty", "price",
+                "notional", "commission", "slippage", "funding", "realized", "client_order_id")
 
 
 def _csv(header: tuple[str, ...], rows: list[list[Any]]) -> str:
