@@ -1,8 +1,9 @@
 """Dashboard: FastAPI + Jinja + HTMX, de SOLO LECTURA sobre el ledger (informe §8).
 
 Vistas 1 (Live), 2 (P&L por estrategia), 5 (Salud) y 6 (Riesgo) de la §8.2, más
-Mercado (el archivo de Coinalyze) e Historial (qué pasó cada día y por qué cambió la
-equity, exportable en CSV). Las vistas 3 (aprendizaje) y 4 (propuestas) dependen de la
+Mercado (el archivo de Coinalyze), Historial (qué pasó cada día y por qué cambió la
+equity) y Operaciones (cada entrada con su salida, a qué precio y por qué), las dos
+exportables en CSV. Las vistas 3 (aprendizaje) y 4 (propuestas) dependen de la
 Fase 3 y no existen todavía.
 
 No hay ningún POST: el kill switch se activa con /run/trading/HALT, Redis o una fila
@@ -25,12 +26,12 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import Engine, text
 
-from api import charts, history, queries
+from api import charts, history, queries, trades
 
 WEB = Path(__file__).resolve().parents[1] / "web"
 REFRESH_SECONDS = 30
 VIEWS = [("live", "/", "LIVE"), ("pnl", "/pnl", "P&L POR ESTRATEGIA"),
-         ("historial", "/historial", "HISTORIAL"),
+         ("historial", "/historial", "HISTORIAL"), ("operaciones", "/operaciones", "OPERACIONES"),
          ("mercado", "/mercado", "MERCADO"), ("salud", "/salud", "SALUD"),
          ("riesgo", "/riesgo", "RIESGO")]
 
@@ -146,7 +147,9 @@ def create_app(engine: Engine, *, redis_url: str | None,
                         per_sleeve.setdefault(r.strategy_id, []).append(
                             (r.day.strftime("%d %b"), r.change))
                 first, last = history.activity_days(conn)
+                start, end = history.day_bounds(day)
                 return {
+                    "moves": trades.price_moves(conn, start, end),
                     "day": day, "today": now.date(), "first": first, "last": last,
                     "prev": day - timedelta(days=1), "next": day + timedelta(days=1),
                     "rows": rows, "detail": detail,
@@ -179,6 +182,9 @@ def create_app(engine: Engine, *, redis_url: str | None,
                                                            colors=colors)
                     out[f"fr_{asset}_legend"] = charts.legend(list(fr), colors)
                 return out
+            if name == "operaciones":
+                rows = trades.trades(conn)
+                return {"trades": rows, "totals": trades.totals(rows)}
             if name == "salud":
                 return {"archive": queries.archive_health(conn),
                         "kill_switch": queries.kill_switch_state(engine, redis_url),
@@ -221,6 +227,13 @@ def create_app(engine: Engine, *, redis_url: str | None,
             rows = history.daily_history(conn, until=clock().date(), days=max(1, min(days, 3650)))
         return PlainTextResponse(history.history_csv(rows), media_type="text/csv", headers={
             "Content-Disposition": 'attachment; filename="historial_diario.csv"'})
+
+    @app.get("/export/operaciones.csv")
+    def export_trades() -> PlainTextResponse:
+        with engine.connect() as conn:
+            rows = trades.trades(conn)
+        return PlainTextResponse(trades.trades_csv(rows), media_type="text/csv", headers={
+            "Content-Disposition": 'attachment; filename="operaciones.csv"'})
 
     @app.get("/export/fills.csv")
     def export_fills(day: str | None = None) -> PlainTextResponse:

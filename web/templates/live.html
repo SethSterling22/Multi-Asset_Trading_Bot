@@ -16,7 +16,9 @@
       <th>Precio</th><th>Comisión</th><th>Funding</th></tr></thead>
     <tbody>{% for f in v.fills %}
       <tr><td class="mono">{{ f.ts.strftime("%H:%M:%S") }}</td><td>{{ f.strategy_id }}</td>
-        <td class="mono">{{ f.symbol }}</td><td>{{ f.side.value }}</td><td>{{ f.qty | dec }}</td>
+        <td class="mono">{{ f.symbol }}</td>
+        <td>{% if f.venue_fill_id.endswith(":fee") %}<span class="neu">comisión en especie</span>{% else %}{{ f.side.value }}{% endif %}</td>
+        <td>{{ f.qty | dec }}</td>
         <td>{{ f.price | money }}</td><td>{{ f.commission | money }}</td>
         <td class="{{ f.funding_payment | cls }}">{{ f.funding_payment | money }}</td></tr>
     {% endfor %}</tbody>

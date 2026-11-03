@@ -111,6 +111,12 @@ def test_first_cycle_buys_to_target_within_the_sleeve_budget(engine: Engine) -> 
             "SELECT gross_notional FROM equity_curve ORDER BY ts")).scalars().all()
     assert snaps[0] == 0 and snaps[1] > 3900
     assert sleeve.count("reconciliation_runs") == 1
+    # El motivo de cada orden queda con ella, y el precio de cada posición con el snapshot.
+    with engine.connect() as conn:
+        reasons = conn.execute(text("SELECT reason FROM orders")).scalars().all()
+        marks = conn.execute(text("SELECT symbol, qty FROM position_marks")).all()
+    assert all(r and "target 20.00%" in r for r in reasons)
+    assert sorted(m.symbol for m in marks) == ["BTC/USD", "ETH/USD"]
 
 
 def test_second_cycle_is_quiet(engine: Engine) -> None:

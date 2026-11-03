@@ -20,7 +20,7 @@ deployment, know exactly what is implemented and what still needs to be built.
 | Component | Status |
 |---|---|
 | `core/config/models.py` — validation and atomic persistence | Works; bounds import the risk floor |
-| `strategies/crypto_rebalance/` — rebalancing logic + live runner (`live.py`) | Runs against **Alpaca paper** through the order router; dry-run by default (D-014). Tested against a fake venue; **has not yet sent an order to Alpaca** |
+| `strategies/crypto_rebalance/` — rebalancing logic + live runner (`live.py`) | Runs against **Alpaca paper** through the order router; dry-run by default (D-014). Its first 2 orders filled on 2026-11-02; Alpaca's 0.25 % fee in kind is recorded since D-015 |
 | `app_dashboard.py` — Streamlit panel | Reads CSVs that nothing writes; retired in Session 7 |
 | `strategies/wheel/` — Wheel cycle and Lumibot adapter | Logic tested behind a fake broker; **the adapter has never run against Alpaca** |
 | Delta (`core/greeks.py`) | Broker greeks → Black-Scholes with IV → skip and log. Never guessed |
@@ -316,7 +316,15 @@ sleeve stops until you look at it.
    and recreate it with `$C --profile crypto up -d crypto`. From then on it sends paper
    orders.
 
-After a mismatch, check what did not match, fix the cause, and only then lift the
+If a mismatch comes from fees taken in kind on fills recorded before D-015, correct
+them with the tool. It shows what it would write unless you pass `--apply`, and it
+lifts the kill switch only if the ledger then matches Alpaca:
+```bash
+$C --profile crypto run --rm --no-deps crypto python -m execution.fee_correction
+$C --profile crypto run --rm --no-deps crypto python -m execution.fee_correction --apply --lift-kill-switch --actor seth
+```
+
+For any other mismatch, check what did not match, fix the cause, and only then lift the
 kill switch (`risk_events` is append-only: lifting it is a new row, not a delete):
 ```bash
 $C exec postgres psql -U trading -d trading -c \
@@ -346,7 +354,8 @@ What each view is for (all times UTC):
 | Header | Paper or live; whether any kill switch is on (global **or any sleeve**) and why; total equity, today's realized P&L, worst drawdown and which sleeve it belongs to |
 | Live | Each sleeve's equity over 7 days on its own scale, with ▼ at every fill; today's fills |
 | P&L por estrategia | Realized P&L since the start, gross → fees → funding → slippage → net, plus the unrealized P&L of open positions |
-| Historial | One row per day and sleeve: equity change split into realized net, change in unrealized, and "outside the ledger". Click a day for its fills, orders (with rejection reasons), reconciliations, risk events and snapshots. CSV export: `/export/historial.csv`, `/export/fills.csv?day=YYYY-MM-DD` |
+| Historial | One row per day and sleeve: equity change split into realized net, change in unrealized, and "outside the ledger". Click a day for the price move of each open position (why the unrealized changed), its fills, orders (with rejection reasons), reconciliations, risk events and snapshots. CSV export: `/export/historial.csv`, `/export/fills.csv?day=YYYY-MM-DD` |
+| Operaciones | Every entry paired with its exit (FIFO): price, amount paid and received (fees included), the reason the strategy gave for each order, net P&L and holding time. Open ones are valued at the last mark. CSV export: `/export/operaciones.csv` |
 | Mercado | The Coinalyze archive: open interest, funding, liquidations per venue |
 | Salud | Kill-switch state per scope, with the last event, who set it and why; archive coverage |
 | Riesgo | Open positions from the ledger and the risk-floor limits in force |

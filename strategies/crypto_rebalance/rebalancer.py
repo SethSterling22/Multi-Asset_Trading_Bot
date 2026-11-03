@@ -43,12 +43,12 @@ class SpotBroker(Protocol):
         """Spot price in USD for the symbol."""
         ...
 
-    def market_buy(self, symbol: str, notional_usd: float) -> str:
-        """Spot buy by USD notional. Returns the order id."""
+    def market_buy(self, symbol: str, notional_usd: float, reason: str = "") -> str:
+        """Spot buy by USD notional. Returns the order id. `reason` is recorded with it."""
         ...
 
-    def market_sell(self, symbol: str, quantity: float) -> str:
-        """Spot sell by unit quantity. Returns the order id."""
+    def market_sell(self, symbol: str, quantity: float, reason: str = "") -> str:
+        """Spot sell by unit quantity. Returns the order id. `reason` is recorded with it."""
         ...
 
 
@@ -71,7 +71,7 @@ class PaperSpotBroker:
     def get_price_usd(self, symbol: str) -> float:
         return self._prices[symbol]
 
-    def market_buy(self, symbol: str, notional_usd: float) -> str:
+    def market_buy(self, symbol: str, notional_usd: float, reason: str = "") -> str:
         if notional_usd > self._balances.get(STABLE_SYMBOL, 0.0) + 1e-9:
             raise ValueError(f"insufficient {STABLE_SYMBOL} for {notional_usd}")
         qty = notional_usd / self._prices[symbol]
@@ -80,7 +80,7 @@ class PaperSpotBroker:
         self._order_seq += 1
         return f"paper-buy-{self._order_seq}"
 
-    def market_sell(self, symbol: str, quantity: float) -> str:
+    def market_sell(self, symbol: str, quantity: float, reason: str = "") -> str:
         if quantity > self._balances.get(symbol, 0.0) + 1e-12:
             raise ValueError(f"insufficient {symbol} for {quantity}")
         self._balances[symbol] -= quantity
@@ -196,7 +196,9 @@ class CryptoRebalancer(StrategyBase):
             if dry_run:
                 continue
             if order.side == "sell":
-                order_ids.append(self.broker.market_sell(order.symbol, order.quantity))
+                order_ids.append(self.broker.market_sell(order.symbol, order.quantity,
+                                                         reason=order.reason))
             else:
-                order_ids.append(self.broker.market_buy(order.symbol, order.notional_usd))
+                order_ids.append(self.broker.market_buy(order.symbol, order.notional_usd,
+                                                        reason=order.reason))
         return order_ids

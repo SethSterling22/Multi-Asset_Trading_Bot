@@ -60,6 +60,21 @@
     + fuera del ledger {{ r.outside_ledger | money }}.</p>
   {% endif %}{% endfor %}
 
+  <div class="sub-h">Por qué se movió el no realizado · precio de cada posición abierta</div>
+  {% if v.moves %}
+  <table>
+    <thead><tr><th>Sleeve</th><th>Símbolo</th><th>Cantidad</th><th>Precio desde</th><th>Precio hasta</th>
+      <th>Cambio</th><th>Efecto en la posición</th><th>Tramo (UTC)</th></tr></thead>
+    <tbody>{% for m in v.moves %}
+      <tr><td>{{ m.strategy_id }}</td><td class="mono">{{ m.symbol }}</td><td>{{ m.qty | dec }}</td>
+        <td>{{ m.mark_from | money }}</td><td>{{ m.mark_to | money }}</td>
+        <td class="{{ m.change_pct | cls }}">{{ m.change_pct | pct }}</td>
+        <td class="{{ m.pnl | cls }}">{{ m.pnl | money }}</td>
+        <td class="mono">{{ m.ts_from.strftime("%m-%d %H:%M") }} → {{ m.ts_to.strftime("%m-%d %H:%M") }}</td></tr>
+    {% endfor %}</tbody>
+  </table>
+  {% else %}<p class="empty">Sin precios de posiciones registrados este día (se guardan desde D-015).</p>{% endif %}
+
   <div class="sub-h">Equity del día · horas UTC · ▼ = un fill</div>
   {% if v.charts %}<div class="grid2">{% for c in v.charts %}
     <div><div class="sub-h">{{ c.sleeve }}</div>{{ c.svg | safe }}</div>{% endfor %}</div>
@@ -73,7 +88,9 @@
       <th>Realizado</th><th>Orden</th></tr></thead>
     <tbody>{% for f in v.detail.fills %}
       <tr><td class="mono">{{ f.ts.strftime("%H:%M:%S") }}</td><td>{{ f.strategy_id }}</td>
-        <td class="mono">{{ f.symbol }}</td><td>{{ f.side }}</td><td>{{ f.qty | dec }}</td>
+        <td class="mono">{{ f.symbol }}</td>
+        <td>{% if f.kind == "fee_in_kind" %}<span class="neu" title="Lo que Alpaca se quedó del activo comprado (D-015): reduce la posición, es comisión y no mueve caja">comisión en especie</span>{% else %}{{ f.side }}{% endif %}</td>
+        <td>{{ f.qty | dec }}</td>
         <td>{{ f.price | money }}</td><td>{{ f.notional | money }}</td><td>{{ f.commission | money }}</td>
         <td class="{{ (-f.slippage) | cls }}">{{ f.slippage | money }}</td>
         <td class="{{ f.funding | cls }}">{{ f.funding | money }}</td>

@@ -524,3 +524,43 @@ informe; aquí queda el resumen y la sección donde se justifica cada una.
 - **Límites conocidos:** los checks pre-trade ven solo este sleeve (la exposición
   agregada entre sleeves llega con el segundo sleeve operando). El fill se registra
   agregado por orden (`venue_fill_id` = id de la orden), no por ejecución parcial.
+
+---
+
+## 2026-11-03 · D-015 · Alpaca cobra la comisión cripto en especie; motivo y precios persistidos
+
+- **Contexto:** las dos primeras órdenes de paper (2026-11-02 06:38 UTC) se llenaron y la
+  reconciliación siguiente paró `crypto_rebalance`: el ledger tenía 0.025617702 BTC y
+  0.876044135 ETH, y Alpaca 0.025553656 y 0.873854024. Era el punto que D-014 dejó sin
+  verificar (comisión 0 en el ledger).
+- **Observado (paper, 4 ejecuciones de 2 órdenes):** en una compra, Alpaca se queda el
+  **0.25 % de cada ejecución en el activo comprado, redondeado hacia arriba a 1e-9**, y la
+  orden sigue informando la cantidad bruta. Con esa regla la cantidad neta calculada
+  coincide con la posición al último dígito; aplicada al agregado, BTC se queda 1e-9 corto.
+- **Decisiones:**
+  1. El adaptador calcula la comisión de las ejecuciones de la orden
+     (`/account/activities/FILL`). Si aún no suman la cantidad llena, `VenueUnavailableError`
+     y la reconciliación vuelve a mirar: la comisión nunca se estima.
+  2. El fill registra la cantidad **neta** recibida, y como comisión el valor de lo cobrado
+     al precio del fill. El flujo de caja sigue siendo lo pagado de verdad.
+  3. `TAKER_FEE_RATE = 0.0025` es una constante del adaptador (tier 1; una market es taker).
+     Si el tier cambia, las cantidades dejan de cuadrar y la reconciliación para el sleeve:
+     falla cerrado, no en silencio.
+  4. **En una venta la comisión va en USD (`qty · precio · 0.25 %`): NO observado todavía.**
+     La caja del sleeve no se reconcilia con la de la cuenta, así que un error ahí no lo
+     pararía. Hay que verificarlo contra la caja de la cuenta en la primera venta.
+  5. Los fills de antes no se reescriben (`fills` es append-only). `execution.fee_correction`
+     añade por cada compra anterior un fill `side=sell`, `qty = comisión`, al precio del
+     fill y con ese valor como comisión: posición −comisión, realizado 0, caja 0.
+     `venue_fill_id` = `<orden>:fee`, así que repetirlo es un no-op. Levanta el kill switch
+     (actor = quien lo ejecuta) solo si después el ledger cuadra. En Historial, los días
+     anteriores a la corrección muestran la comisión como "fuera del ledger" (+/−), porque
+     sus snapshots son de antes de registrarla.
+  6. Migración 0004: **`orders.reason`**, el motivo que dio la estrategia para cada orden
+     (hasta ahora solo estaba en los logs), y **`position_marks`**, cantidad y precio de
+     marca de cada posición abierta en cada snapshot. Con ellos el dashboard dice por qué
+     se movió el no realizado (qué símbolo y cuánto) y empareja cada entrada con su salida
+     (Operaciones, FIFO).
+- **Lo que costó el primer día:** 4 000.82 $ pagados; 10.00 $ de comisión (0.25 %) y
+  1.27 $ de slippage frente al mid en la decisión. El resto es que BTC y ETH bajaron un
+  ~1–1.5 % tras la entrada: es mercado, no un defecto.

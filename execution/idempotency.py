@@ -50,6 +50,7 @@ class OrderIntent:
     decision_price: Decimal
     risk_floor_hash: str            # hex de core.risk_floor.floor_hash()
     order_type: str = "market"
+    reason: str | None = None       # por qué se decidió: va al diario de operaciones
 
     def __post_init__(self) -> None:
         if self.side not in ("buy", "sell"):
@@ -76,17 +77,18 @@ def record_intent(conn: Connection, intent: OrderIntent) -> bool:
     """Paso 1. Devuelve False si el id ya existía: esa orden NO se vuelve a enviar."""
     row = conn.execute(text("""
         INSERT INTO orders (client_order_id, venue, symbol, asset_type, side, qty, order_type,
-                            status, strategy_id, decision_price, risk_floor_hash)
+                            status, strategy_id, decision_price, risk_floor_hash, reason)
         VALUES (:coid, :venue, :symbol, CAST(:asset_type AS asset_type), :side, :qty,
                 :order_type, 'PENDING_NEW', :strategy_id, :decision_price,
-                decode(:risk_floor_hash, 'hex'))
+                decode(:risk_floor_hash, 'hex'), :reason)
         ON CONFLICT (client_order_id) DO NOTHING
         RETURNING client_order_id
     """), {"coid": intent.client_order_id, "venue": intent.venue, "symbol": intent.symbol,
            "asset_type": intent.asset_type.value, "side": intent.side, "qty": intent.qty,
            "order_type": intent.order_type, "strategy_id": intent.strategy_id,
            "decision_price": intent.decision_price,
-           "risk_floor_hash": intent.risk_floor_hash}).first()
+           "risk_floor_hash": intent.risk_floor_hash,
+           "reason": None if intent.reason is None else intent.reason[:500]}).first()
     return row is not None
 
 
