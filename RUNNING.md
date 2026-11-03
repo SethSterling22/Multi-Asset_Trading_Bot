@@ -339,6 +339,22 @@ listen directly on Sadida's Tailscale IP instead, set `DASHBOARD_BIND=100.x.y.z`
 `/etc/trading/compose.env` and recreate the container. The dashboard is read-only
 and has no broker keys; the tailnet is its only access control (D-013).
 
+What each view is for (all times UTC):
+
+| View | Answers |
+|---|---|
+| Header | Paper or live; whether any kill switch is on (global **or any sleeve**) and why; total equity, today's realized P&L, worst drawdown and which sleeve it belongs to |
+| Live | Each sleeve's equity over 7 days on its own scale, with ▼ at every fill; today's fills |
+| P&L por estrategia | Realized P&L since the start, gross → fees → funding → slippage → net, plus the unrealized P&L of open positions |
+| Historial | One row per day and sleeve: equity change split into realized net, change in unrealized, and "outside the ledger". Click a day for its fills, orders (with rejection reasons), reconciliations, risk events and snapshots. CSV export: `/export/historial.csv`, `/export/fills.csv?day=YYYY-MM-DD` |
+| Mercado | The Coinalyze archive: open interest, funding, liquidations per venue |
+| Salud | Kill-switch state per scope, with the last event, who set it and why; archive coverage |
+| Riesgo | Open positions from the ledger and the risk-floor limits in force |
+
+"Outside the ledger" is the part of a day's equity change that the sleeve's own fills do
+not explain. It should be ~0. Today it is not for the Wheel: it takes its equity from
+the whole Alpaca account, so the crypto sleeve's moves in the same account land there.
+
 Day to day (`C="docker compose -f docker/compose.runtime.yml --env-file /etc/trading/compose.env"`):
 
 ```bash
